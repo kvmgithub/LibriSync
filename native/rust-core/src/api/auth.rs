@@ -561,9 +561,7 @@ impl Account {
             "AccountId={}|AccountName={}|Locale={}",
             Self::mask(&self.account_id),
             Self::mask(&self.account_name),
-            self.locale()
-                .map(|l| l.name.as_str())
-                .unwrap_or("[empty]")
+            self.locale().map(|l| l.name.as_str()).unwrap_or("[empty]")
         )
     }
 
@@ -580,7 +578,7 @@ impl Account {
             let first_two: String = chars.iter().take(2).collect();
             let last_two: String = chars.iter().skip(chars.len() - 2).collect();
             let middle_len = chars.len() - 4;
-            format!("{}{}{}",  first_two, "*".repeat(middle_len), last_two)
+            format!("{}{}{}", first_two, "*".repeat(middle_len), last_two)
         }
     }
 
@@ -601,23 +599,26 @@ impl Account {
     /// AccessTokenExpires = newToken.Expires;
     /// ```
     pub async fn refresh_tokens(&mut self) -> Result<()> {
-        let identity = self.identity.as_mut().ok_or_else(|| {
-            LibationError::AuthenticationFailed {
-                message: "No identity tokens to refresh".to_string(),
-                account_id: Some(self.account_id.clone()),
-            }
-        })?;
+        let identity =
+            self.identity
+                .as_mut()
+                .ok_or_else(|| LibationError::AuthenticationFailed {
+                    message: "No identity tokens to refresh".to_string(),
+                    account_id: Some(self.account_id.clone()),
+                })?;
 
         // Call the refresh_access_token function
         let token_response = refresh_access_token(
             &identity.locale,
             &identity.refresh_token,
             &identity.device_serial_number,
-        ).await?;
+        )
+        .await?;
 
         // Update the identity with new tokens
         identity.access_token.token = token_response.access_token;
-        identity.access_token.expires_at = Utc::now() + chrono::Duration::seconds(token_response.expires_in);
+        identity.access_token.expires_at =
+            Utc::now() + chrono::Duration::seconds(token_response.expires_in);
 
         // Update refresh token if provided (some implementations return a new refresh token)
         if let Some(new_refresh_token) = token_response.refresh_token {
@@ -641,18 +642,17 @@ impl Account {
     /// This requires authenticated API access. The exact endpoint is part of
     /// the Audible private API and must be reverse-engineered or documented.
     pub async fn get_activation_bytes(&mut self) -> Result<String> {
-        let identity = self.identity.as_ref().ok_or_else(|| {
-            LibationError::AuthenticationFailed {
-                message: "No identity tokens for activation bytes retrieval".to_string(),
-                account_id: Some(self.account_id.clone()),
-            }
-        })?;
+        let identity =
+            self.identity
+                .as_ref()
+                .ok_or_else(|| LibationError::AuthenticationFailed {
+                    message: "No identity tokens for activation bytes retrieval".to_string(),
+                    account_id: Some(self.account_id.clone()),
+                })?;
 
         // Call the get_activation_bytes function
-        let activation_bytes = get_activation_bytes(
-            &identity.locale,
-            &identity.access_token.token,
-        ).await?;
+        let activation_bytes =
+            get_activation_bytes(&identity.locale, &identity.access_token.token).await?;
 
         // Store in decrypt_key field
         self.decrypt_key = activation_bytes.clone();
@@ -744,7 +744,7 @@ impl Locale {
             country_code: "de".to_string(),
             domain: "audible.de".to_string(),
             name: "Germany".to_string(),
-            with_username: true,
+            with_username: false,
         }
     }
 
@@ -819,6 +819,16 @@ impl Locale {
         }
     }
 
+    /// Get the BR locale (audible.com.br)
+    pub fn br() -> Self {
+        Self {
+            country_code: "br".to_string(),
+            domain: "audible.com.br".to_string(),
+            name: "Brazil".to_string(),
+            with_username: false,
+        }
+    }
+
     /// Get all supported locales
     pub fn all() -> Vec<Self> {
         vec![
@@ -832,6 +842,7 @@ impl Locale {
             Self::es(),
             Self::in_(),
             Self::jp(),
+            Self::br(),
         ]
     }
 
@@ -873,13 +884,13 @@ impl Default for CustomerInfo {
 // OAuth Flow Functions
 // ============================================================================
 
+use base64::{engine::general_purpose, Engine as _};
 use rand::Rng;
+use rsa::{pkcs8::EncodePrivateKey, RsaPrivateKey};
 use sha2::{Digest, Sha256};
-use base64::{Engine as _, engine::general_purpose};
-use url::Url;
 use std::collections::HashMap as StdHashMap;
+use url::Url;
 use uuid::Uuid;
-use rsa::{RsaPrivateKey, pkcs8::EncodePrivateKey};
 
 /// OAuth configuration constants
 /// Based on mkb79 Python library (https://github.com/mkb79/Audible)
@@ -1038,9 +1049,10 @@ pub fn generate_authorization_url(
     let serial_and_type = format!("{}#{}", device_serial, config.device_type);
 
     // Hex-encode to LOWERCASE (AudibleApi uses lowercase!)
-    let serial_type_hex = serial_and_type.as_bytes()
+    let serial_type_hex = serial_and_type
+        .as_bytes()
         .iter()
-        .map(|b| format!("{:02x}", b))  // lowercase!
+        .map(|b| format!("{:02x}", b)) // lowercase!
         .collect::<String>();
 
     // Full client ID for token exchange (not hex-encoded)
@@ -1059,6 +1071,7 @@ pub fn generate_authorization_url(
         "es" => "amazon.es",
         "in" => "amazon.in",
         "jp" => "amazon.co.jp",
+        "br" => "amazon.com.br",
         _ => "amazon.com", // Default fallback
     };
 
@@ -1075,28 +1088,46 @@ pub fn generate_authorization_url(
         query.append_pair("openid.oa2.code_challenge", &pkce.challenge);
 
         // OpenID parameters
-        query.append_pair("openid.return_to", &format!("https://www.{}/ap/maplanding", amazon_domain));
-        query.append_pair("openid.assoc_handle", &format!("amzn_audible_ios_{}", locale.country_code));
-        query.append_pair("openid.identity", "http://specs.openid.net/auth/2.0/identifier_select");
+        query.append_pair(
+            "openid.return_to",
+            &format!("https://www.{}/ap/maplanding", amazon_domain),
+        );
+        query.append_pair(
+	    "openid.assoc_handle", 
+	    &format!("amzn_audible_ios_{}", locale.country_code),
+	);
+        query.append_pair(
+            "openid.identity",
+            "http://specs.openid.net/auth/2.0/identifier_select",
+        );
         query.append_pair("pageId", "amzn_audible_ios");
         query.append_pair("accountStatusPolicy", "P1");
-        query.append_pair("openid.claimed_id", "http://specs.openid.net/auth/2.0/identifier_select");
+        query.append_pair(
+            "openid.claimed_id",
+            "http://specs.openid.net/auth/2.0/identifier_select",
+        );
         query.append_pair("openid.mode", "checkid_setup");
 
         // Namespace declarations (CRITICAL - must match Libation)
         query.append_pair("openid.ns.oa2", "http://www.amazon.com/ap/ext/oauth/2");
 
         // OAuth client ID (device: prefix + hex-encoded serial#type, matching Libation exactly)
-        query.append_pair("openid.oa2.client_id", &format!("device:{}", serial_type_hex));
+        query.append_pair(
+            "openid.oa2.client_id",
+            &format!("device:{}", serial_type_hex),
+        );
 
         // PAPE namespace and parameters
-        query.append_pair("openid.ns.pape", "http://specs.openid.net/extensions/pape/1.0");
+        query.append_pair(
+            "openid.ns.pape",
+            "http://specs.openid.net/extensions/pape/1.0",
+        );
 
         // Marketplace ID (locale-specific)
         let marketplace_id = match locale.country_code.as_str() {
             "us" => "AF2M0KC94RCEA",
             "uk" => "A2I9A3Q2GNFNGQ",
-            "de" => "AN7EY7DTAW63G",
+            "de" => "AN7V1F1VY261K",
             "fr" => "A2728XDNODOQ8T",
             "ca" => "A2CQZ5RBY40XE",
             "au" => "AN7EY7DTAW63G",
@@ -1104,6 +1135,7 @@ pub fn generate_authorization_url(
             "es" => "ALMIKO4SZCSAR",
             "in" => "AJO3FBRUE6J4S",
             "jp" => "A1QAP3MOU4173J",
+            "br" => "A10J1VAYUDTYRN",
             _ => "AF2M0KC94RCEA", // Default to US
         };
         query.append_pair("marketPlaceId", marketplace_id);
@@ -1157,9 +1189,7 @@ pub fn generate_authorization_url(
 /// # Ok(())
 /// # }
 /// ```
-pub fn parse_authorization_callback(
-    callback_url: &str,
-) -> Result<String> {
+pub fn parse_authorization_callback(callback_url: &str) -> Result<String> {
     let url = Url::parse(callback_url)
         .map_err(|e| LibationError::InvalidInput(format!("Invalid callback URL: {}", e)))?;
 
@@ -1170,7 +1200,8 @@ pub fn parse_authorization_callback(
 
     // Check for OAuth errors
     if let Some(error) = params.get("error") {
-        let error_desc = params.get("error_description")
+        let error_desc = params
+            .get("error_description")
             .map(|s| s.as_str())
             .unwrap_or("No description");
         return Err(LibationError::AuthenticationFailed {
@@ -1181,7 +1212,8 @@ pub fn parse_authorization_callback(
 
     // Extract authorization code
     // The code might be in different parameters depending on OAuth mode
-    let code = params.get("openid.oa2.authorization_code")
+    let code = params
+        .get("openid.oa2.authorization_code")
         .or_else(|| params.get("code"))
         .ok_or_else(|| LibationError::AuthenticationFailed {
             message: "Missing authorization code in callback".to_string(),
@@ -1197,7 +1229,7 @@ pub struct TokenResponse {
     pub access_token: String,
     #[serde(default)]
     pub refresh_token: Option<String>,
-    pub expires_in: i64,  // Seconds until expiration
+    pub expires_in: i64, // Seconds until expiration
     pub token_type: String,
 }
 
@@ -1223,7 +1255,7 @@ pub struct RegistrationResponse {
 pub struct BearerTokenInfo {
     pub access_token: String,
     pub refresh_token: String,
-    pub expires_in: String,  // String because API returns "3600" as string
+    pub expires_in: String, // String because API returns "3600" as string
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1298,9 +1330,10 @@ pub async fn exchange_authorization_code(
     // Build hex-encoded client_id (LOWERCASE hex like AudibleApi!)
     // Format: hex(SERIAL#TYPE) without "device:" prefix
     let serial_and_type = format!("{}#{}", device_serial, config.device_type);
-    let serial_type_hex = serial_and_type.as_bytes()
+    let serial_type_hex = serial_and_type
+        .as_bytes()
         .iter()
-        .map(|b| format!("{:02x}", b))  // lowercase hex!
+        .map(|b| format!("{:02x}", b)) // lowercase hex!
         .collect::<String>();
 
     // Amazon domain for token endpoint
@@ -1315,6 +1348,7 @@ pub async fn exchange_authorization_code(
         "es" => "amazon.es",
         "in" => "amazon.in",
         "jp" => "amazon.co.jp",
+        "br" => "amazon.com.br",
         _ => "amazon.com",
     };
 
@@ -1366,7 +1400,10 @@ pub async fn exchange_authorization_code(
     // Log the request for debugging
     eprintln!("=== Device Registration Request ===");
     eprintln!("URL: {}", register_url);
-    eprintln!("Body: {}", serde_json::to_string_pretty(&request_body).unwrap_or_default());
+    eprintln!(
+        "Body: {}",
+        serde_json::to_string_pretty(&request_body).unwrap_or_default()
+    );
     eprintln!("===================================");
 
     // Make HTTP request
@@ -1410,8 +1447,8 @@ pub async fn exchange_authorization_code(
     }
 
     // Parse the response we just logged
-    let register_response: serde_json::Value = serde_json::from_str(&response_text)
-        .map_err(|e| LibationError::InvalidApiResponse {
+    let register_response: serde_json::Value =
+        serde_json::from_str(&response_text).map_err(|e| LibationError::InvalidApiResponse {
             message: format!("Failed to parse registration response: {}", e),
             response_body: Some(response_text.clone()),
         })?;
@@ -1425,17 +1462,20 @@ pub async fn exchange_authorization_code(
             response_body: Some(register_response.to_string()),
         })?;
 
-    let tokens = success.get("tokens")
+    let tokens = success
+        .get("tokens")
         .ok_or_else(|| LibationError::InvalidApiResponse {
             message: "Tokens not found in registration response".to_string(),
             response_body: Some(register_response.to_string()),
         })?;
 
-    let extensions = success.get("extensions")
-        .ok_or_else(|| LibationError::InvalidApiResponse {
-            message: "Extensions not found in registration response".to_string(),
-            response_body: Some(register_response.to_string()),
-        })?;
+    let extensions =
+        success
+            .get("extensions")
+            .ok_or_else(|| LibationError::InvalidApiResponse {
+                message: "Extensions not found in registration response".to_string(),
+                response_body: Some(register_response.to_string()),
+            })?;
 
     // Parse bearer tokens
     let bearer: BearerTokenInfo = serde_json::from_value(tokens.get("bearer").unwrap().clone())
@@ -1447,36 +1487,43 @@ pub async fn exchange_authorization_code(
     // Parse MAC-DMS tokens
     let mac_dms: MacDmsTokenInfo = serde_json::from_value(tokens.get("mac_dms").unwrap().clone())
         .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse mac_dms tokens: {}", e),
-            response_body: Some(tokens.to_string()),
-        })?;
+        message: format!("Failed to parse mac_dms tokens: {}", e),
+        response_body: Some(tokens.to_string()),
+    })?;
 
     // Parse website cookies
-    let website_cookies: Vec<Cookie> = serde_json::from_value(tokens.get("website_cookies").unwrap().clone())
-        .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse website_cookies: {}", e),
-            response_body: Some(tokens.to_string()),
+    let website_cookies: Vec<Cookie> =
+        serde_json::from_value(tokens.get("website_cookies").unwrap().clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
+                message: format!("Failed to parse website_cookies: {}", e),
+                response_body: Some(tokens.to_string()),
+            }
         })?;
 
     // Parse store authentication cookie
-    let store_authentication_cookie: StoreAuthCookie = serde_json::from_value(tokens.get("store_authentication_cookie").unwrap().clone())
-        .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse store_authentication_cookie: {}", e),
-            response_body: Some(tokens.to_string()),
-        })?;
+    let store_authentication_cookie: StoreAuthCookie =
+        serde_json::from_value(tokens.get("store_authentication_cookie").unwrap().clone())
+            .map_err(|e| LibationError::InvalidApiResponse {
+                message: format!("Failed to parse store_authentication_cookie: {}", e),
+                response_body: Some(tokens.to_string()),
+            })?;
 
     // Parse device info
-    let device_info: DeviceInfo = serde_json::from_value(extensions.get("device_info").unwrap().clone())
-        .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse device_info: {}", e),
-            response_body: Some(extensions.to_string()),
+    let device_info: DeviceInfo =
+        serde_json::from_value(extensions.get("device_info").unwrap().clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
+                message: format!("Failed to parse device_info: {}", e),
+                response_body: Some(extensions.to_string()),
+            }
         })?;
 
     // Parse customer info
-    let customer_info: CustomerInfo = serde_json::from_value(extensions.get("customer_info").unwrap().clone())
-        .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse customer_info: {}", e),
-            response_body: Some(extensions.to_string()),
+    let customer_info: CustomerInfo =
+        serde_json::from_value(extensions.get("customer_info").unwrap().clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
+                message: format!("Failed to parse customer_info: {}", e),
+                response_body: Some(extensions.to_string()),
+            }
         })?;
 
     Ok(RegistrationResponse {
@@ -1529,6 +1576,7 @@ pub async fn refresh_access_token(
         "es" => "amazon.es",
         "in" => "amazon.in",
         "jp" => "amazon.co.jp",
+        "br" => "amazon.com.br",
         _ => "amazon.com",
     };
 
@@ -1539,7 +1587,10 @@ pub async fn refresh_access_token(
     form_data.insert("app_version".to_string(), "3.56.2".to_string());
     form_data.insert("source_token".to_string(), refresh_token.to_string());
     form_data.insert("source_token_type".to_string(), "refresh_token".to_string());
-    form_data.insert("requested_token_type".to_string(), "access_token".to_string());
+    form_data.insert(
+        "requested_token_type".to_string(),
+        "access_token".to_string(),
+    );
 
     let client = reqwest::Client::new();
     let response = client
@@ -1561,11 +1612,14 @@ pub async fn refresh_access_token(
         });
     }
 
-    let token_response: TokenResponse = response.json().await
-        .map_err(|e| LibationError::InvalidApiResponse {
-            message: format!("Failed to parse refresh token response: {}", e),
-            response_body: None,
-        })?;
+    let token_response: TokenResponse =
+        response
+            .json()
+            .await
+            .map_err(|e| LibationError::InvalidApiResponse {
+                message: format!("Failed to parse refresh token response: {}", e),
+                response_body: None,
+            })?;
 
     Ok(token_response)
 }
@@ -1607,18 +1661,19 @@ pub async fn ensure_valid_token(
     account_json: &str,
     refresh_threshold_minutes: i64,
 ) -> Result<String> {
-    use chrono::Duration;
     use crate::storage::accounts::save_account;
+    use chrono::Duration;
 
     // Parse account JSON
     let mut account: Account = serde_json::from_str(account_json)
         .map_err(|e| LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
 
     // Check if we have identity with access token
-    let identity = account.identity.as_ref()
-        .ok_or_else(|| LibationError::InvalidState(
-            "Account has no identity - cannot check token expiry".to_string()
-        ))?;
+    let identity = account.identity.as_ref().ok_or_else(|| {
+        LibationError::InvalidState(
+            "Account has no identity - cannot check token expiry".to_string(),
+        )
+    })?;
 
     let expires_at = identity.access_token.expires_at;
     let now = chrono::Utc::now();
@@ -1661,8 +1716,9 @@ pub async fn ensure_valid_token(
         }
 
         // Serialize updated account
-        let updated_json = serde_json::to_string(&account)
-            .map_err(|e| LibationError::InvalidState(format!("Failed to serialize account: {}", e)))?;
+        let updated_json = serde_json::to_string(&account).map_err(|e| {
+            LibationError::InvalidState(format!("Failed to serialize account: {}", e))
+        })?;
 
         // Get the new expiry for logging before account is moved
         let new_expiry_str = expires_at.to_rfc3339();
@@ -1673,8 +1729,7 @@ pub async fn ensure_valid_token(
 
         eprintln!(
             "✅ Access token refreshed for account '{}'. New expiry: {}",
-            account_id,
-            new_expiry_str
+            account_id, new_expiry_str
         );
 
         Ok(updated_json)
@@ -1723,8 +1778,11 @@ pub async fn register_device(
         .map_err(|e| LibationError::InternalError(format!("Failed to generate RSA key: {}", e)))?;
 
     // Convert private key to PEM format
-    let private_key_pem = private_key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-        .map_err(|e| LibationError::InternalError(format!("Failed to encode private key: {}", e)))?;
+    let private_key_pem = private_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .map_err(|e| {
+            LibationError::InternalError(format!("Failed to encode private key: {}", e))
+        })?;
 
     // Generate device serial number
     let device_serial = Uuid::new_v4().to_string();
@@ -1759,10 +1817,7 @@ pub async fn register_device(
 ///
 /// # Errors
 /// Returns error if API call fails or activation bytes not found
-pub async fn get_activation_bytes(
-    locale: &Locale,
-    access_token: &str,
-) -> Result<String> {
+pub async fn get_activation_bytes(locale: &Locale, access_token: &str) -> Result<String> {
     // AudibleApi uses the Audible login URI, not API URI
     let api_url = format!(
         "https://www.{}/license/token?action=register&player_manuf=Audible,iPhone&player_model=iPhone",
@@ -1784,14 +1839,19 @@ pub async fn get_activation_bytes(
         let status = response.status();
         let error_body = response.text().await.unwrap_or_default();
         return Err(LibationError::ApiRequestFailed {
-            message: format!("Failed to retrieve activation bytes (status {}): {}", status, error_body),
+            message: format!(
+                "Failed to retrieve activation bytes (status {}): {}",
+                status, error_body
+            ),
             status_code: Some(status.as_u16()),
             endpoint: Some("/license/token".to_string()),
         });
     }
 
     // Response is a binary blob (activation blob)
-    let device_license = response.bytes().await
+    let device_license = response
+        .bytes()
+        .await
         .map_err(|e| LibationError::InvalidApiResponse {
             message: format!("Failed to read activation blob: {}", e),
             response_body: None,
@@ -1801,7 +1861,10 @@ pub async fn get_activation_bytes(
 
     if device_license.len() < ACTIVATION_BLOB_SZ {
         return Err(LibationError::InvalidApiResponse {
-            message: format!("Unexpected activation response size: {} bytes", device_license.len()),
+            message: format!(
+                "Unexpected activation response size: {} bytes",
+                device_license.len()
+            ),
             response_body: None,
         });
     }
@@ -1831,22 +1894,27 @@ pub async fn get_activation_bytes(
 /// # Errors
 /// Returns error if deregistration fails
 pub async fn deregister_device(account: &Account) -> Result<()> {
-    let identity = account.identity.as_ref()
-        .ok_or_else(|| LibationError::AuthenticationFailed {
-            message: "No identity tokens for deregistration".to_string(),
-            account_id: Some(account.account_id.clone()),
-        })?;
+    let identity =
+        account
+            .identity
+            .as_ref()
+            .ok_or_else(|| LibationError::AuthenticationFailed {
+                message: "No identity tokens for deregistration".to_string(),
+                account_id: Some(account.account_id.clone()),
+            })?;
 
     let api_url = format!(
         "https://api.{}/1.0/devices/{}",
-        identity.locale.domain,
-        identity.device_serial_number
+        identity.locale.domain, identity.device_serial_number
     );
 
     let client = reqwest::Client::new();
     let response = client
         .delete(&api_url)
-        .header("Authorization", format!("Bearer {}", identity.access_token.token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", identity.access_token.token),
+        )
         .send()
         .await
         .map_err(|e| LibationError::NetworkError {
@@ -1858,7 +1926,10 @@ pub async fn deregister_device(account: &Account) -> Result<()> {
         let status = response.status();
         let error_body = response.text().await.unwrap_or_default();
         return Err(LibationError::ApiRequestFailed {
-            message: format!("Device deregistration failed (status {}): {}", status, error_body),
+            message: format!(
+                "Device deregistration failed (status {}): {}",
+                status, error_body
+            ),
             status_code: Some(status.as_u16()),
             endpoint: Some("/1.0/devices/...".to_string()),
         });
@@ -2104,8 +2175,10 @@ mod tests {
         // The colon and # are URL encoded in the URL
         assert!(url.contains("device%3A") || url.contains("device:"));
         // Device type is hex-encoded in client_id, so look for hex(#A10KISP2GWF0E4)
-        assert!(url.contains("23413130") || url.contains("A10KISP2GWF0E4"),
-                "URL should contain device type in hex or plain form");
+        assert!(
+            url.contains("23413130") || url.contains("A10KISP2GWF0E4"),
+            "URL should contain device type in hex or plain form"
+        );
         assert!(url.contains(&pkce.challenge));
         // State parameter intentionally not included (matches Libation)
         assert!(url.contains("openid.oa2.scope=device_auth_access"));
@@ -2141,7 +2214,9 @@ mod tests {
 
     #[test]
     fn test_parse_authorization_callback_success() {
-        let state = OAuthState { value: "test-state-123".to_string() };
+        let state = OAuthState {
+            value: "test-state-123".to_string(),
+        };
         let callback_url = format!(
             "https://localhost/callback?openid.oa2.authorization_code=ABC123&state={}",
             state.value
@@ -2153,7 +2228,9 @@ mod tests {
 
     #[test]
     fn test_parse_authorization_callback_code_param() {
-        let state = OAuthState { value: "test-state-456".to_string() };
+        let state = OAuthState {
+            value: "test-state-456".to_string(),
+        };
         let callback_url = format!(
             "https://localhost/callback?code=XYZ789&state={}",
             state.value
@@ -2165,7 +2242,9 @@ mod tests {
 
     #[test]
     fn test_parse_authorization_callback_missing_code() {
-        let state = OAuthState { value: "test-state".to_string() };
+        let state = OAuthState {
+            value: "test-state".to_string(),
+        };
         let callback_url = format!("https://localhost/callback?state={}", state.value);
 
         let result = parse_authorization_callback(&callback_url);
@@ -2184,7 +2263,9 @@ mod tests {
 
     #[test]
     fn test_parse_authorization_callback_oauth_error() {
-        let state = OAuthState { value: "test-state".to_string() };
+        let state = OAuthState {
+            value: "test-state".to_string(),
+        };
         let callback_url = format!(
             "https://localhost/callback?error=access_denied&error_description=User+cancelled&state={}",
             state.value
@@ -2204,7 +2285,9 @@ mod tests {
 
     #[test]
     fn test_parse_authorization_callback_invalid_url() {
-        let state = OAuthState { value: "test-state".to_string() };
+        let state = OAuthState {
+            value: "test-state".to_string(),
+        };
         let callback_url = "not-a-valid-url";
 
         let result = parse_authorization_callback(callback_url);
@@ -2217,11 +2300,17 @@ mod tests {
     fn test_oauth_config_defaults() {
         let config = OAuthConfig::default();
 
-        assert_eq!(config.device_type, "A10KISP2GWF0E4", "Device type must match AudibleApi Android");
+        assert_eq!(
+            config.device_type, "A10KISP2GWF0E4",
+            "Device type must match AudibleApi Android"
+        );
         assert_eq!(config.response_type, "code");
         assert_eq!(config.scope, "device_auth_access");
         assert_eq!(config.code_challenge_method, "S256");
-        assert!(config.redirect_uri.contains("maplanding"), "redirect_uri should use Amazon's maplanding page");
+        assert!(
+            config.redirect_uri.contains("maplanding"),
+            "redirect_uri should use Amazon's maplanding page"
+        );
     }
 
     // ========== Integration Test Helpers ==========
@@ -2280,7 +2369,8 @@ mod tests {
         // Generate device serial as 32-character hex string (matches Libation format)
         // Libation uses 16 random bytes encoded as 32 hex characters
         let random_bytes: [u8; 16] = rand::random();
-        let device_serial = random_bytes.iter()
+        let device_serial = random_bytes
+            .iter()
             .map(|b| format!("{:02X}", b))
             .collect::<String>();
 
@@ -2316,22 +2406,43 @@ mod tests {
         // Step 4: Parse callback
         match parse_authorization_callback(callback_url) {
             Ok(authorization_code) => {
-                println!("✅ Authorization code received: {}...", &authorization_code[..20]);
+                println!(
+                    "✅ Authorization code received: {}...",
+                    &authorization_code[..20]
+                );
 
                 // Step 5: Exchange code for tokens
                 println!("🔄 Exchanging code for tokens...\n");
 
-                match exchange_authorization_code(&locale, &authorization_code, &device_serial, &pkce).await {
+                match exchange_authorization_code(
+                    &locale,
+                    &authorization_code,
+                    &device_serial,
+                    &pkce,
+                )
+                .await
+                {
                     Ok(token_response) => {
                         println!("✅ Token Exchange Successful!");
-                        println!("   Access Token: {}...", &token_response.bearer.access_token[..30]);
-                        println!("   Refresh Token: {}...", &token_response.bearer.refresh_token[..30]);
-                        println!("   Expires In: {} seconds", token_response.bearer.expires_in);
+                        println!(
+                            "   Access Token: {}...",
+                            &token_response.bearer.access_token[..30]
+                        );
+                        println!(
+                            "   Refresh Token: {}...",
+                            &token_response.bearer.refresh_token[..30]
+                        );
+                        println!(
+                            "   Expires In: {} seconds",
+                            token_response.bearer.expires_in
+                        );
 
                         // Step 6: Get activation bytes
                         println!("🔓 Retrieving activation bytes...\n");
 
-                        match get_activation_bytes(&locale, &token_response.bearer.access_token).await {
+                        match get_activation_bytes(&locale, &token_response.bearer.access_token)
+                            .await
+                        {
                             Ok(activation_bytes) => {
                                 println!("✅ Activation Bytes Retrieved!");
                                 println!("   Activation Bytes: {}\n", activation_bytes);
@@ -2358,7 +2469,9 @@ mod tests {
                     }
                     Err(e) => {
                         println!("❌ Token Exchange Failed: {:?}\n", e);
-                        panic!("Token exchange failed - check authorization code and PKCE verifier");
+                        panic!(
+                            "Token exchange failed - check authorization code and PKCE verifier"
+                        );
                     }
                 }
             }
@@ -2424,13 +2537,18 @@ mod tests {
             .unwrap();
 
         // Ensure token is valid (should not refresh)
-        let result = ensure_valid_token(db.pool(), &account_json, 30).await.unwrap();
+        let result = ensure_valid_token(db.pool(), &account_json, 30)
+            .await
+            .unwrap();
 
         // Parse result
         let result_account: Account = serde_json::from_str(&result).unwrap();
 
         // Token should be unchanged
-        assert_eq!(result_account.identity.unwrap().access_token.token, "test_token");
+        assert_eq!(
+            result_account.identity.unwrap().access_token.token,
+            "test_token"
+        );
     }
 
     /// Test ensure_valid_token with a token that is expiring soon
