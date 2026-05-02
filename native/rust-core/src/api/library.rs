@@ -307,7 +307,7 @@ pub struct LibraryItem {
 
     /// Subscription plans
     #[serde(default)]
-    pub plans: Vec<Plan>,
+    pub plans: Option<Vec<Plan>>,
 
     // === RELATIONSHIPS (for episodes/series) ===
     /// Relationships to other products (parent/child)
