@@ -866,8 +866,10 @@ export default function LibraryScreen() {
                 <FlatList
                     data={audiobooks}
                     renderItem={renderItem}
-                    keyExtractor={(item) => item.audible_product_id}
-                    contentContainerStyle={styles.list}
+		    keyExtractor={(item, index) =>
+		      `${item.id ?? item.audible_product_id}-${index}`
+		    }                   
+		    contentContainerStyle={styles.list}
                     ItemSeparatorComponent={() => <View style={styles.separator}/>}
                     onEndReached={handleLoadMore}
                     onEndReachedThreshold={0.5}
