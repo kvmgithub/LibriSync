@@ -5,7 +5,6 @@ import { WebView } from 'react-native-webview';
 import {
   initiateOAuth,
   completeOAuthFlow,
-  getActivationBytes,
   RustBridgeError,
 } from '../../modules/expo-rust-bridge';
 import type { Account, Locale } from '../../modules/expo-rust-bridge';
@@ -179,16 +178,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           },
         };
 
-        // Get activation bytes
-        try {
-          console.log('[LoginScreen] Requesting activation bytes...');
-          const activationBytes = await getActivationBytes(account);
-          account.decrypt_key = activationBytes;
-          console.log('[LoginScreen] Activation bytes received:', activationBytes);
-        } catch (error) {
-          console.warn('[LoginScreen] Failed to get activation bytes:', error);
-          // Continue without activation bytes - can get them later
-        }
+        // Activation bytes are not required during login - they can be
+        // retrieved later when needed for decryption
+        console.log('[LoginScreen] Skipping activation bytes during login');
 
         // Store account in secure storage
         console.log('[LoginScreen] Storing account in secure storage...');
