@@ -305,9 +305,9 @@ pub struct LibraryItem {
     #[serde(rename = "is_ayce", default)]
     pub is_ayce: Option<bool>,
 
-    /// Subscription plans
+    /// Subscription plans (API may return null)
     #[serde(default)]
-    pub plans: Vec<Plan>,
+    pub plans: Option<Vec<Plan>>,
 
     // === RELATIONSHIPS (for episodes/series) ===
     /// Relationships to other products (parent/child)
@@ -1543,5 +1543,45 @@ mod tests {
         assert_eq!(options.page_number, 1);
         assert!(options.response_groups.contains("media"));
         assert!(options.response_groups.contains("contributors"));
+    }
+
+    #[test]
+    fn test_library_item_null_plans() {
+        // API may return "plans": null — must not fail deserialization
+        let json = r#"{
+            "asin": "B001TEST",
+            "title": "Test Book",
+            "purchase_date": "2024-01-01T00:00:00Z",
+            "plans": null
+        }"#;
+        let item: LibraryItem = serde_json::from_str(json).unwrap();
+        assert_eq!(item.asin, "B001TEST");
+        assert!(item.plans.is_none());
+    }
+
+    #[test]
+    fn test_library_item_missing_plans() {
+        // plans field missing entirely should also work
+        let json = r#"{
+            "asin": "B002TEST",
+            "title": "Test Book 2",
+            "purchase_date": "2024-01-01T00:00:00Z"
+        }"#;
+        let item: LibraryItem = serde_json::from_str(json).unwrap();
+        assert_eq!(item.asin, "B002TEST");
+        assert!(item.plans.is_none());
+    }
+
+    #[test]
+    fn test_library_item_with_plans() {
+        let json = r#"{
+            "asin": "B003TEST",
+            "title": "Test Book 3",
+            "purchase_date": "2024-01-01T00:00:00Z",
+            "plans": [{"plan_name": "Premium Plus"}]
+        }"#;
+        let item: LibraryItem = serde_json::from_str(json).unwrap();
+        assert!(item.plans.is_some());
+        assert_eq!(item.plans.unwrap().len(), 1);
     }
 }
