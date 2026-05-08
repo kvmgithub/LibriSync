@@ -24,11 +24,13 @@ import {
     setBookFilePath,
     createCoverArtFile,
     requestNotificationPermission,
+    getPrimaryAccount,
+    saveAccount,
 } from '../../modules/expo-rust-bridge';
 import type {Book, Account, DownloadTask} from '../../modules/expo-rust-bridge';
-import {Paths} from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as DocumentPicker from 'expo-document-picker';
+import {getDatabasePath} from '../utils/appPaths';
 
 const DOWNLOAD_PATH_KEY = 'download_path';
 const LIBRARY_PREFS_KEY = 'library_preferences';
@@ -116,9 +118,7 @@ export default function LibraryScreen() {
     useEffect(() => {
         const pollProgress = () => {
             try {
-                const cacheUri = Paths.cache.uri;
-                const cachePath = cacheUri.replace('file://', '');
-                const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+                const dbPath = getDatabasePath();
 
                 const tasks = listDownloadTasks(dbPath);
                 const taskMap = new Map<string, DownloadTask>();
@@ -170,9 +170,7 @@ export default function LibraryScreen() {
 
     const loadFilterOptions = async () => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             try {
                 initializeDatabase(dbPath);
@@ -191,9 +189,7 @@ export default function LibraryScreen() {
 
     const loadBooks = async (reset: boolean = false) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             console.log('[LibraryScreen] Loading books from:', dbPath);
 
@@ -366,13 +362,14 @@ export default function LibraryScreen() {
                 return;
             }
 
-            const accountData = await SecureStore.getItemAsync('audible_account');
-            if (!accountData) {
+            const dbPath = getDatabasePath();
+            initializeDatabase(dbPath);
+
+            let account = await getPrimaryAccount(dbPath);
+            if (!account) {
                 Alert.alert('Error', 'Please log in first');
                 return;
             }
-
-            let account: Account = JSON.parse(accountData);
 
             if (account.identity?.access_token) {
                 const expiresAt = new Date(account.identity.access_token.expires_at);
@@ -390,7 +387,7 @@ export default function LibraryScreen() {
                         const newExpiresAt = new Date(Date.now() + parseInt(newTokens.expires_in.toString()) * 1000).toISOString();
                         account.identity.access_token.expires_at = newExpiresAt;
 
-                        await SecureStore.setItemAsync('audible_account', JSON.stringify(account));
+                        await saveAccount(dbPath, account);
                         console.log('[LibraryScreen] Token refreshed successfully');
                     } catch (refreshError) {
                         console.error('[LibraryScreen] Token refresh failed:', refreshError);
@@ -439,9 +436,7 @@ export default function LibraryScreen() {
 
     const handlePauseDownload = (book: Book) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             const task = downloadTasks.get(book.audible_product_id);
             if (task) {
@@ -455,9 +450,7 @@ export default function LibraryScreen() {
 
     const handleResumeDownload = (book: Book) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             const task = downloadTasks.get(book.audible_product_id);
             if (task) {
@@ -471,9 +464,7 @@ export default function LibraryScreen() {
 
     const handleCancelDownload = (book: Book) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             const task = downloadTasks.get(book.audible_product_id);
             if (task) {
@@ -500,9 +491,7 @@ export default function LibraryScreen() {
 
     const handleRetryConversion = async (book: Book) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             await retryConversion(dbPath, book.audible_product_id);
             console.log('[LibraryScreen] Conversion retry started:', book.title);
@@ -514,9 +503,7 @@ export default function LibraryScreen() {
 
     const handleMarkAsNotDownloaded = async (book: Book) => {
         try {
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             // Check if file exists
             const filePath = await getBookFilePath(dbPath, book.audible_product_id);
@@ -548,11 +535,26 @@ export default function LibraryScreen() {
                             onPress: async () => {
                                 try {
                                     const result = await clearBookDownloadState(dbPath, book.audible_product_id, true);
-                                    console.log('[LibraryScreen] Deleted file and cleared status:', book.title);
                                     if (result.file_deleted) {
-                                        Alert.alert('Success', `File deleted and download status cleared for "${book.title}".`);
+                                        console.log('[LibraryScreen] Deleted file and cleared status:', {
+                                            title: book.title,
+                                            coverDeleted: result.cover_deleted,
+                                            bookFolderDeleted: result.book_folder_deleted,
+                                            authorFolderDeleted: result.author_folder_deleted,
+                                            cleanupError: result.cleanup_error,
+                                        });
+                                        if (result.cleanup_error) {
+                                            Alert.alert('Partial Cleanup', `File deleted and download status cleared for "${book.title}".\n\nCleanup error: ${result.cleanup_error}`);
+                                        } else {
+                                            Alert.alert('Success', `File deleted and download status cleared for "${book.title}".`);
+                                        }
                                     } else {
-                                        Alert.alert('Partial Success', `Download status cleared, but file could not be deleted.\n\nYou may need to delete it manually.`);
+                                        console.warn('[LibraryScreen] Cleared status but file delete failed:', {
+                                            title: book.title,
+                                            error: result.delete_error,
+                                        });
+                                        const deleteError = result.delete_error ? `\n\nDelete error: ${result.delete_error}` : '';
+                                        Alert.alert('Partial Success', `Download status cleared, but file could not be deleted.${deleteError}\n\nYou may need to delete it manually.`);
                                     }
                                     loadBooks(true);
                                 } catch (error: any) {
@@ -607,9 +609,7 @@ export default function LibraryScreen() {
             }
 
             const file = result.assets[0];
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             console.log('[LibraryScreen] Selected file:', file.uri);
 
@@ -635,9 +635,7 @@ export default function LibraryScreen() {
             }
 
             // Get the book's file path
-            const cacheUri = Paths.cache.uri;
-            const cachePath = cacheUri.replace('file://', '');
-            const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+            const dbPath = getDatabasePath();
 
             const filePath = await getBookFilePath(dbPath, book.audible_product_id);
 

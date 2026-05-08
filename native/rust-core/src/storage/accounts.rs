@@ -23,30 +23,22 @@ use sqlx::SqlitePool;
 ///
 /// # Returns
 /// Success status
-pub async fn save_account(
-    pool: &SqlitePool,
-    account_id: &str,
-    account_json: &str,
-) -> Result<()> {
+pub async fn save_account(pool: &SqlitePool, account_id: &str, account_json: &str) -> Result<()> {
     // Parse JSON to extract key fields
     let account: serde_json::Value = serde_json::from_str(account_json)
         .map_err(|e| LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
 
-    let account_name = account["account_name"]
-        .as_str()
-        .unwrap_or(account_id);
+    let account_name = account["account_name"].as_str().unwrap_or(account_id);
 
     let locale_code = account["locale"]["country_code"]
         .as_str()
         .ok_or_else(|| LibationError::InvalidInput("Missing locale country_code".to_string()))?;
 
     // Extract identity JSON
-    let identity_json = account["identity"]
-        .to_string();
+    let identity_json = account["identity"].to_string();
 
     // Extract token expiry if available
-    let token_expires_at = account["identity"]["access_token"]["expires_at"]
-        .as_str();
+    let token_expires_at = account["identity"]["access_token"]["expires_at"].as_str();
 
     let decrypt_key = account["decrypt_key"].as_str();
 
@@ -90,10 +82,7 @@ pub async fn save_account(
 ///
 /// # Returns
 /// Complete account JSON or None if not found
-pub async fn get_account(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> Result<Option<String>> {
+pub async fn get_account(pool: &SqlitePool, account_id: &str) -> Result<Option<String>> {
     let row: Option<(String, String, String, String, Option<String>)> = sqlx::query_as(
         r#"
         SELECT
@@ -112,16 +101,21 @@ pub async fn get_account(
 
     if let Some((acc_id, acc_name, locale_code, identity_json, decrypt_key)) = row {
         // Parse identity JSON from database
-        let identity: serde_json::Value = serde_json::from_str(&identity_json)
-            .map_err(|e| LibationError::InvalidState(format!("Corrupt identity JSON in database: {}", e)))?;
+        let identity: serde_json::Value = serde_json::from_str(&identity_json).map_err(|e| {
+            LibationError::InvalidState(format!("Corrupt identity JSON in database: {}", e))
+        })?;
+
+        let locale = identity.get("locale").cloned().unwrap_or_else(|| {
+            serde_json::json!({
+                "country_code": locale_code
+            })
+        });
 
         // Reconstruct account using serde_json (proper serialization)
         let mut account = serde_json::json!({
             "account_id": acc_id,
             "account_name": acc_name,
-            "locale": {
-                "country_code": locale_code
-            },
+            "locale": locale,
             "identity": identity,
             "library_scan": true
         });
@@ -196,10 +190,7 @@ pub async fn update_token_expiry(
 /// # Arguments
 /// * `pool` - Database connection pool
 /// * `account_id` - Account identifier
-pub async fn update_last_sync(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> Result<()> {
+pub async fn update_last_sync(pool: &SqlitePool, account_id: &str) -> Result<()> {
     sqlx::query(
         r#"
         UPDATE Accounts
@@ -219,10 +210,7 @@ pub async fn update_last_sync(
 /// # Arguments
 /// * `pool` - Database connection pool
 /// * `account_id` - Account identifier
-pub async fn delete_account(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> Result<()> {
+pub async fn delete_account(pool: &SqlitePool, account_id: &str) -> Result<()> {
     sqlx::query("DELETE FROM Accounts WHERE account_id = ?")
         .bind(account_id)
         .execute(pool)
@@ -243,11 +231,12 @@ mod tests {
         let account_json = r#"{
             "account_id": "test@example.com",
             "account_name": "Test Account",
-            "locale": {"country_code": "us"},
+            "locale": {"country_code": "us", "name": "United States", "domain": "audible.com", "with_username": true},
             "identity": {
                 "access_token": {"token": "abc123", "expires_at": "2025-01-01T00:00:00Z"},
                 "refresh_token": "xyz789",
-                "device_serial_number": "ABC123"
+                "device_serial_number": "ABC123",
+                "locale": {"country_code": "us", "name": "United States", "domain": "audible.com", "with_username": true}
             },
             "decrypt_key": "12345678"
         }"#;
@@ -267,6 +256,8 @@ mod tests {
         let retrieved_json: serde_json::Value = serde_json::from_str(&retrieved).unwrap();
         assert_eq!(retrieved_json["account_id"], "test@example.com");
         assert_eq!(retrieved_json["locale"]["country_code"], "us");
+        assert_eq!(retrieved_json["locale"]["domain"], "audible.com");
+        assert_eq!(retrieved_json["locale"]["with_username"], true);
     }
 
     #[tokio::test]
@@ -276,8 +267,12 @@ mod tests {
         let account1 = r#"{"account_id": "first@example.com", "account_name": "First", "locale": {"country_code": "us"}, "identity": {"access_token": {"token": "a"},"refresh_token": "b","device_serial_number": "c"}}"#;
         let account2 = r#"{"account_id": "second@example.com", "account_name": "Second", "locale": {"country_code": "uk"}, "identity": {"access_token": {"token": "d"},"refresh_token": "e","device_serial_number": "f"}}"#;
 
-        save_account(db.pool(), "first@example.com", account1).await.unwrap();
-        save_account(db.pool(), "second@example.com", account2).await.unwrap();
+        save_account(db.pool(), "first@example.com", account1)
+            .await
+            .unwrap();
+        save_account(db.pool(), "second@example.com", account2)
+            .await
+            .unwrap();
 
         // Primary should be first one created
         let primary = get_primary_account(db.pool()).await.unwrap().unwrap();

@@ -664,6 +664,52 @@ impl PersistentDownloadManager {
         Ok(())
     }
 
+    /// Update task status and optionally set error/output path.
+    pub async fn update_task_status_with_details(
+        &self,
+        task_id: &str,
+        status: TaskStatus,
+        error: Option<&str>,
+        output_path: Option<&str>,
+    ) -> Result<()> {
+        match (error, output_path) {
+            (Some(err_msg), Some(path)) => {
+                sqlx::query("UPDATE DownloadTasks SET status = ?, error = ?, output_path = ? WHERE task_id = ?")
+                    .bind(status.as_str())
+                    .bind(err_msg)
+                    .bind(path)
+                    .bind(task_id)
+                    .execute(&*self.pool)
+                    .await?;
+            }
+            (Some(err_msg), None) => {
+                sqlx::query("UPDATE DownloadTasks SET status = ?, error = ? WHERE task_id = ?")
+                    .bind(status.as_str())
+                    .bind(err_msg)
+                    .bind(task_id)
+                    .execute(&*self.pool)
+                    .await?;
+            }
+            (None, Some(path)) => {
+                sqlx::query("UPDATE DownloadTasks SET status = ?, error = NULL, output_path = ? WHERE task_id = ?")
+                    .bind(status.as_str())
+                    .bind(path)
+                    .bind(task_id)
+                    .execute(&*self.pool)
+                    .await?;
+            }
+            (None, None) => {
+                sqlx::query("UPDATE DownloadTasks SET status = ?, error = NULL WHERE task_id = ?")
+                    .bind(status.as_str())
+                    .bind(task_id)
+                    .execute(&*self.pool)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Store conversion keys and output directory for a task (enables retry without re-download)
     pub async fn store_conversion_keys(&self, task_id: &str, aaxc_key: &str, aaxc_iv: &str, output_directory: &str) -> Result<()> {
         sqlx::query("UPDATE DownloadTasks SET aaxc_key = ?, aaxc_iv = ?, output_directory = ? WHERE task_id = ?")

@@ -8,7 +8,6 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
-import java.io.File
 import kotlinx.coroutines.*
 
 /**
@@ -145,8 +144,7 @@ class DownloadService : Service() {
         Log.d(TAG, "Service created")
 
         // Get database path from intent or use default
-        val cacheDir = applicationContext.cacheDir
-        dbPath = File(cacheDir, "audible.db").absolutePath
+        dbPath = AppPaths.databasePath(applicationContext)
 
         orchestrator = DownloadOrchestrator(applicationContext, dbPath)
         notificationManager = DownloadNotificationManager(applicationContext)

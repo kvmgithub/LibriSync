@@ -69,7 +69,6 @@ modules/**/ios/build/
 
 # Rust
 native/rust-core/target/
-native/rust-core/Cargo.lock
 *.so
 *.dylib
 *.dll
@@ -86,7 +85,9 @@ tests/fixtures/test_account.json
 .env.test
 *.aax
 *.aaxc
-/native/rust-core/test_fixtures/
+/native/rust-core/test_fixtures/*
+!/native/rust-core/test_fixtures/
+!/native/rust-core/test_fixtures/registration_response.json
 
 # Development/testing tools
 test-workers.sh

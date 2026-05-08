@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! HTTP client for Audible API
 //!
 //! This module provides a robust HTTP client wrapper for the Audible API with features including:
@@ -93,10 +92,10 @@
 //!                                   "ca", "fr", "de", "in", "it", "co.jp", "es"];
 //! ```
 
-use crate::error::{LibationError, Result};
 use crate::api::auth::{Account, Identity, Locale};
-use reqwest::{Client, Method, Request, Response, StatusCode};
+use crate::error::{LibationError, Result};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
+use reqwest::{Client, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -303,7 +302,7 @@ impl ClientConfigBuilder {
 /// use rust_core::api::auth::Account;
 ///
 /// # async fn example() -> rust_core::error::Result<()> {
-/// let account = Account::new("user@example.com".to_string());
+/// let account = Account::new("user@example.com".to_string())?;
 /// let client = AudibleClient::new(account)?;
 ///
 /// // GET request
@@ -360,7 +359,9 @@ impl AudibleClient {
         // Validate account fields
         // Reference: ApiExtended.cs:31-33 (ArgumentValidator checks)
         if account.account_id.is_empty() {
-            return Err(LibationError::MissingRequiredField("account_id".to_string()));
+            return Err(LibationError::MissingRequiredField(
+                "account_id".to_string(),
+            ));
         }
 
         // Build HTTP client with configuration
@@ -371,10 +372,7 @@ impl AudibleClient {
             HeaderValue::from_str(&config.user_agent)
                 .map_err(|e| LibationError::InvalidInput(format!("Invalid user agent: {}", e)))?,
         );
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
 
         let mut client_builder = Client::builder()
             .timeout(config.timeout)
@@ -450,13 +448,8 @@ impl AudibleClient {
         Q: Serialize,
     {
         let url = format!("{}{}", self.base_url, endpoint);
-        self.request_with_retry(|client, headers| {
-            client
-                .get(&url)
-                .query(query)
-                .headers(headers)
-        })
-        .await
+        self.request_with_retry(|client, headers| client.get(&url).query(query).headers(headers))
+            .await
     }
 
     /// Perform a POST request with JSON body
@@ -491,13 +484,8 @@ impl AudibleClient {
         T: serde::de::DeserializeOwned,
     {
         let url = format!("{}{}", self.base_url, endpoint);
-        self.request_with_retry(|client, headers| {
-            client
-                .post(&url)
-                .headers(headers)
-                .form(form)
-        })
-        .await
+        self.request_with_retry(|client, headers| client.post(&url).headers(headers).form(form))
+            .await
     }
 
     /// Generic HTTP request with automatic token refresh and retry logic
@@ -626,7 +614,9 @@ impl AudibleClient {
                             ));
 
                             // Exponential backoff: 1s, 2s, 4s...
-                            let delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS * 2_u64.pow(attempts - 1));
+                            let delay = Duration::from_secs(
+                                INITIAL_RETRY_DELAY_SECS * 2_u64.pow(attempts - 1),
+                            );
                             sleep(delay).await;
                             continue;
                         }
@@ -639,13 +629,17 @@ impl AudibleClient {
                 }
 
                 // Network error - retry with backoff
-                Err(e) if attempts < self.config.max_retries && self.is_retryable_network_error(&e) => {
+                Err(e)
+                    if attempts < self.config.max_retries
+                        && self.is_retryable_network_error(&e) =>
+                {
                     last_error = Some(LibationError::network_error(
                         format!("Network request failed: {}", e),
                         true,
                     ));
 
-                    let delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS * 2_u64.pow(attempts - 1));
+                    let delay =
+                        Duration::from_secs(INITIAL_RETRY_DELAY_SECS * 2_u64.pow(attempts - 1));
                     sleep(delay).await;
                     continue;
                 }
@@ -661,13 +655,13 @@ impl AudibleClient {
         }
 
         // All retries exhausted
-        Err(last_error.unwrap_or_else(|| {
-            LibationError::ApiRequestFailed {
+        Err(
+            last_error.unwrap_or_else(|| LibationError::ApiRequestFailed {
                 message: format!("Request failed after {} attempts", attempts),
                 status_code: None,
                 endpoint: None,
-            }
-        }))
+            }),
+        )
     }
 
     /// Build authentication headers from account tokens
@@ -682,8 +676,9 @@ impl AudibleClient {
             let auth_value = format!("Bearer {}", identity.access_token.token);
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&auth_value)
-                    .map_err(|e| LibationError::InvalidInput(format!("Invalid auth token: {}", e)))?,
+                HeaderValue::from_str(&auth_value).map_err(|e| {
+                    LibationError::InvalidInput(format!("Invalid auth token: {}", e))
+                })?,
             );
         }
 
@@ -699,11 +694,14 @@ impl AudibleClient {
         let url = response.url().clone();
 
         // Get response text first so we can log it on parse error
-        let response_text = response.text().await.map_err(|e| LibationError::ApiRequestFailed {
-            message: format!("Failed to read response body: {}", e),
-            status_code: Some(status.as_u16()),
-            endpoint: Some(url.path().to_string()),
-        })?;
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| LibationError::ApiRequestFailed {
+                message: format!("Failed to read response body: {}", e),
+                status_code: Some(status.as_u16()),
+                endpoint: Some(url.path().to_string()),
+            })?;
 
         match serde_json::from_str::<T>(&response_text) {
             Ok(data) => Ok(data),
@@ -757,9 +755,7 @@ impl AudibleClient {
 
     /// Extract endpoint path from full URL
     fn extract_endpoint_from_url(&self, url: &str) -> String {
-        url.strip_prefix(&self.base_url)
-            .unwrap_or(url)
-            .to_string()
+        url.strip_prefix(&self.base_url).unwrap_or(url).to_string()
     }
 
     /// Refresh authentication tokens
@@ -769,7 +765,9 @@ impl AudibleClient {
     async fn refresh_tokens(&self) -> Result<()> {
         // TODO: Port token refresh logic from C# Identity class
         // For now, return NotImplemented error
-        Err(LibationError::not_implemented("Token refresh not yet implemented"))
+        Err(LibationError::not_implemented(
+            "Token refresh not yet implemented",
+        ))
     }
 
     /// Download file with progress callback
@@ -795,12 +793,7 @@ impl AudibleClient {
         })?;
 
         let headers = self.build_auth_headers().await?;
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(url).headers(headers).send().await?;
 
         if !response.status().is_success() {
             return Err(LibationError::DownloadFailed(format!(
@@ -843,11 +836,20 @@ mod tests {
 
     #[test]
     fn test_audible_domain_from_str() {
-        assert_eq!(AudibleDomain::from_str("audible.com"), Some(AudibleDomain::Us));
+        assert_eq!(
+            AudibleDomain::from_str("audible.com"),
+            Some(AudibleDomain::Us)
+        );
         assert_eq!(AudibleDomain::from_str("com"), Some(AudibleDomain::Us));
-        assert_eq!(AudibleDomain::from_str("audible.co.uk"), Some(AudibleDomain::Uk));
+        assert_eq!(
+            AudibleDomain::from_str("audible.co.uk"),
+            Some(AudibleDomain::Uk)
+        );
         assert_eq!(AudibleDomain::from_str("co.uk"), Some(AudibleDomain::Uk));
-        assert_eq!(AudibleDomain::from_str("audible.de"), Some(AudibleDomain::De));
+        assert_eq!(
+            AudibleDomain::from_str("audible.de"),
+            Some(AudibleDomain::De)
+        );
         assert_eq!(AudibleDomain::from_str("invalid"), None);
     }
 
@@ -887,6 +889,9 @@ mod tests {
 
         let result = AudibleClient::new(account);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), LibationError::MissingRequiredField(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            LibationError::MissingRequiredField(_)
+        ));
     }
 }

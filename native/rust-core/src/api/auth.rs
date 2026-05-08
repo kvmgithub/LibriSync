@@ -117,8 +117,7 @@
 //! # use rust_core::error::Result;
 //! # async fn example() -> Result<()> {
 //! // Create a new account
-//! let mut account = Account::new("user@example.com".to_string());
-//! account.set_locale(Locale::us());
+//! let mut account = Account::new("user@example.com".to_string())?;
 //!
 //! // Authenticate (in real app, this would involve external browser)
 //! // let identity = authenticate_with_browser(&account.locale()).await?;
@@ -1093,9 +1092,9 @@ pub fn generate_authorization_url(
             &format!("https://www.{}/ap/maplanding", amazon_domain),
         );
         query.append_pair(
-	    "openid.assoc_handle", 
-	    &format!("amzn_audible_ios_{}", locale.country_code),
-	);
+            "openid.assoc_handle",
+            &format!("amzn_audible_ios_{}", locale.country_code),
+        );
         query.append_pair(
             "openid.identity",
             "http://specs.openid.net/auth/2.0/identifier_select",
@@ -1421,32 +1420,24 @@ pub async fn exchange_authorization_code(
     if !response.status().is_success() {
         let status = response.status();
         let error_body = response.text().await.unwrap_or_default();
+        let error_preview = if error_body.chars().count() > 512 {
+            format!("{}...", error_body.chars().take(512).collect::<String>())
+        } else {
+            error_body
+        };
         eprintln!("=== Registration Failed ===");
         eprintln!("Status: {}", status);
-        eprintln!("Response: {}", error_body);
+        eprintln!("Response: {}", error_preview);
         eprintln!("===========================");
         return Err(LibationError::AuthenticationFailed {
-            message: format!("Token exchange failed (status {}): {}", status, error_body),
+            message: format!("Token exchange failed (status {})", status),
             account_id: None,
         });
     }
 
     let response_text = response.text().await.unwrap_or_default();
 
-    // Try to save to app's cache directory (writable)
-    let cache_paths = [
-        "/data/data/com.librisync.app/cache/registration.json",
-        "/sdcard/Download/audible_registration.json",
-    ];
-
-    for path in &cache_paths {
-        if let Ok(_) = std::fs::write(path, &response_text) {
-            eprintln!("✅ Saved registration to: {}", path);
-            break;
-        }
-    }
-
-    // Parse the response we just logged
+    // Parse the response without persisting tokens or customer data to disk.
     let register_response: serde_json::Value =
         serde_json::from_str(&response_text).map_err(|e| LibationError::InvalidApiResponse {
             message: format!("Failed to parse registration response: {}", e),
@@ -2209,7 +2200,10 @@ mod tests {
         // Germany should use amazon.de
         assert!(url.starts_with("https://www.amazon.de/ap/signin"));
         // DE marketplace ID should be AN7V1F1VY261K (not AN7EY7DTAW63G which is AU)
-        assert!(url.contains("AN7V1F1VY261K"), "DE should use marketplace ID AN7V1F1VY261K");
+        assert!(
+            url.contains("AN7V1F1VY261K"),
+            "DE should use marketplace ID AN7V1F1VY261K"
+        );
     }
 
     #[test]
@@ -2217,7 +2211,10 @@ mod tests {
         let locale = Locale::de();
         assert_eq!(locale.country_code, "de");
         assert_eq!(locale.domain, "audible.de");
-        assert!(!locale.with_username, "DE locale should not use username-based auth");
+        assert!(
+            !locale.with_username,
+            "DE locale should not use username-based auth"
+        );
     }
 
     #[test]
@@ -2232,7 +2229,10 @@ mod tests {
     #[test]
     fn test_locale_br_in_all() {
         let all = Locale::all();
-        assert!(all.iter().any(|l| l.country_code == "br"), "BR locale should be in Locale::all()");
+        assert!(
+            all.iter().any(|l| l.country_code == "br"),
+            "BR locale should be in Locale::all()"
+        );
     }
 
     #[test]
@@ -2251,7 +2251,10 @@ mod tests {
         let url = generate_authorization_url(&locale, device_serial, &pkce, &state).unwrap();
 
         assert!(url.starts_with("https://www.amazon.com.br/ap/signin"));
-        assert!(url.contains("A10J1VAYUDTYRN"), "BR should use marketplace ID A10J1VAYUDTYRN");
+        assert!(
+            url.contains("A10J1VAYUDTYRN"),
+            "BR should use marketplace ID A10J1VAYUDTYRN"
+        );
     }
 
     #[test]
@@ -2262,12 +2265,22 @@ mod tests {
             let state = OAuthState::generate();
 
             let url = generate_authorization_url(&locale, device_serial, &pkce, &state).unwrap();
-            assert!(url.starts_with("https://www.amazon"),
-                "Locale {} should generate a valid Amazon auth URL, got: {}", locale.country_code, &url[..50]);
-            assert!(url.contains("marketPlaceId="),
-                "Locale {} auth URL should contain a marketplace ID", locale.country_code);
-            assert!(url.contains("openid.mode=checkid_setup"),
-                "Locale {} auth URL should contain openid mode", locale.country_code);
+            assert!(
+                url.starts_with("https://www.amazon"),
+                "Locale {} should generate a valid Amazon auth URL, got: {}",
+                locale.country_code,
+                &url[..50]
+            );
+            assert!(
+                url.contains("marketPlaceId="),
+                "Locale {} auth URL should contain a marketplace ID",
+                locale.country_code
+            );
+            assert!(
+                url.contains("openid.mode=checkid_setup"),
+                "Locale {} auth URL should contain openid mode",
+                locale.country_code
+            );
         }
     }
 
@@ -2438,9 +2451,9 @@ mod tests {
         let pkce = PkceChallenge::generate().unwrap();
         let state = OAuthState::generate();
 
-        println!("📱 Device Serial: {}", device_serial);
-        println!("🔐 PKCE Verifier: {}", &pkce.verifier[..20]);
-        println!("🎲 State: {}\n", &state.value[..20]);
+        println!("📱 Device serial generated");
+        println!("🔐 PKCE verifier generated");
+        println!("🎲 OAuth state generated\n");
 
         let auth_url = generate_authorization_url(&locale, &device_serial, &pkce, &state).unwrap();
 
@@ -2467,10 +2480,7 @@ mod tests {
         // Step 4: Parse callback
         match parse_authorization_callback(callback_url) {
             Ok(authorization_code) => {
-                println!(
-                    "✅ Authorization code received: {}...",
-                    &authorization_code[..20]
-                );
+                println!("✅ Authorization code received");
 
                 // Step 5: Exchange code for tokens
                 println!("🔄 Exchanging code for tokens...\n");
@@ -2485,14 +2495,8 @@ mod tests {
                 {
                     Ok(token_response) => {
                         println!("✅ Token Exchange Successful!");
-                        println!(
-                            "   Access Token: {}...",
-                            &token_response.bearer.access_token[..30]
-                        );
-                        println!(
-                            "   Refresh Token: {}...",
-                            &token_response.bearer.refresh_token[..30]
-                        );
+                        println!("   Access Token: received");
+                        println!("   Refresh Token: received");
                         println!(
                             "   Expires In: {} seconds",
                             token_response.bearer.expires_in
@@ -2504,9 +2508,9 @@ mod tests {
                         match get_activation_bytes(&locale, &token_response.bearer.access_token)
                             .await
                         {
-                            Ok(activation_bytes) => {
+                            Ok(_) => {
                                 println!("✅ Activation Bytes Retrieved!");
-                                println!("   Activation Bytes: {}\n", activation_bytes);
+                                println!("   Activation Bytes: received\n");
 
                                 println!("🎉 OAuth Flow Complete!");
                                 println!("\n📊 Summary:");

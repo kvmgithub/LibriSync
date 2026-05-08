@@ -30,18 +30,46 @@ fi
 NDK_PATH="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
 echo -e "${GREEN}Using NDK at: $NDK_PATH${NC}"
 
-# Add NDK toolchain to PATH (works on both Intel and Apple Silicon Macs)
-export PATH="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin:$PATH"
+# Detect the host toolchain directory used by the Android NDK.
+HOST_TAG="linux-x86_64"
+case "$(uname -s)" in
+    Darwin)
+        HOST_TAG="darwin-x86_64"
+        ;;
+    Linux)
+        HOST_TAG="linux-x86_64"
+        ;;
+    *)
+        echo -e "${RED}Unsupported host OS: $(uname -s)${NC}"
+        exit 1
+        ;;
+esac
+
+TOOLCHAIN_BIN="$NDK_PATH/toolchains/llvm/prebuilt/$HOST_TAG/bin"
+if [ ! -d "$TOOLCHAIN_BIN" ]; then
+    echo -e "${RED}NDK toolchain not found: $TOOLCHAIN_BIN${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}Using NDK host toolchain: $HOST_TAG${NC}"
+export PATH="$TOOLCHAIN_BIN:$PATH"
 
 # Set up cross-compilation environment for all architectures
-export CC_aarch64_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android30-clang"
-export AR_aarch64_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
-export CC_armv7_linux_androideabi="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi30-clang"
-export AR_armv7_linux_androideabi="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
-export CC_i686_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android30-clang"
-export AR_i686_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
-export CC_x86_64_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android30-clang"
-export AR_x86_64_linux_android="$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+export CC_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android30-clang"
+export AR_aarch64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/aarch64-linux-android30-clang"
+
+export CC_armv7_linux_androideabi="$TOOLCHAIN_BIN/armv7a-linux-androideabi30-clang"
+export AR_armv7_linux_androideabi="$TOOLCHAIN_BIN/llvm-ar"
+export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$TOOLCHAIN_BIN/armv7a-linux-androideabi30-clang"
+
+export CC_i686_linux_android="$TOOLCHAIN_BIN/i686-linux-android30-clang"
+export AR_i686_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/i686-linux-android30-clang"
+
+export CC_x86_64_linux_android="$TOOLCHAIN_BIN/x86_64-linux-android30-clang"
+export AR_x86_64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/x86_64-linux-android30-clang"
 
 # Install Rust targets if not already installed
 echo -e "${YELLOW}Checking Rust targets...${NC}"

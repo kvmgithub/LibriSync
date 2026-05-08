@@ -708,6 +708,11 @@ export interface ExpoRustBridgeModule {
   getPrimaryAccount(dbPath: string): Promise<RustResponse<{ account: string | null }>>;
 
   /**
+   * Delete account from SQLite database.
+   */
+  deleteAccount(dbPath: string, accountId: string): Promise<RustResponse<{ deleted: boolean }>>;
+
+  /**
    * Clear download state for all books (for testing).
    * Resets download status but keeps book metadata.
    */
@@ -736,7 +741,16 @@ export interface ExpoRustBridgeModule {
     dbPath: string,
     asin: string,
     deleteFile: boolean
-  ): Promise<RustResponse<{ cleared: boolean; file_deleted: boolean; deleted_path: string | null }>>;
+  ): Promise<RustResponse<{
+    cleared: boolean;
+    file_deleted: boolean;
+    deleted_path: string | null;
+    cover_deleted?: boolean;
+    book_folder_deleted?: boolean;
+    author_folder_deleted?: boolean;
+    delete_error?: string | null;
+    cleanup_error?: string | null;
+  }>>;
 
   /**
    * Set the file path for a book manually.
@@ -873,6 +887,8 @@ if (!NativeModule) {
   throw new Error('ExpoRustBridge native module failed to load');
 }
 
+const ExpoRustBridge: ExpoRustBridgeModule = NativeModule;
+
 // ============================================================================
 // Error Handling
 // ============================================================================
@@ -964,15 +980,12 @@ function initiateOAuth(
 ): OAuthFlowData {
   console.log('[ExpoRustBridge] initiateOAuth called with locale:', localeCode);
   const serial = deviceSerial || generateDeviceSerial();
-  console.log('[ExpoRustBridge] Using device serial:', serial);
 
   console.log('[ExpoRustBridge] Calling NativeModule.generateOAuthUrl...');
   const response = NativeModule!.generateOAuthUrl(localeCode, serial);
-  console.log('[ExpoRustBridge] Response from native:', response);
 
   const data = unwrapResult(response);
   console.log('[ExpoRustBridge] OAuth data unwrapped successfully');
-  console.log('[ExpoRustBridge] Authorization URL:', data.authorization_url);
 
   return {
     url: data.authorization_url,
@@ -1010,15 +1023,13 @@ async function completeOAuthFlow(
   pkceVerifier: string
 ): Promise<RegistrationResponse> {
   console.log('[ExpoRustBridge] completeOAuthFlow called');
-  console.log('[ExpoRustBridge] Callback URL:', callbackUrl);
 
   // Parse callback URL
   console.log('[ExpoRustBridge] Parsing callback URL...');
   const parseResponse = NativeModule!.parseOAuthCallback(callbackUrl);
-  console.log('[ExpoRustBridge] Parse response:', parseResponse);
 
   const { authorization_code } = unwrapResult(parseResponse);
-  console.log('[ExpoRustBridge] Authorization code extracted:', authorization_code);
+  console.log('[ExpoRustBridge] Authorization code parsed');
 
   // Exchange authorization code for tokens
   const tokenResponse = await NativeModule!.exchangeAuthCode(
@@ -1029,11 +1040,7 @@ async function completeOAuthFlow(
   );
 
   const tokens = unwrapResult(tokenResponse);
-
-  // Log complete token response for debugging
-  console.log('[ExpoRustBridge] ========== COMPLETE TOKEN RESPONSE ==========');
-  console.log(JSON.stringify(tokens, null, 2));
-  console.log('[ExpoRustBridge] ===============================================');
+  console.log('[ExpoRustBridge] Token exchange completed');
 
   return tokens;
 }
@@ -1654,6 +1661,17 @@ async function getPrimaryAccount(dbPath: string): Promise<Account | null> {
 }
 
 /**
+ * Delete account from SQLite database.
+ *
+ * @param dbPath - Database path
+ * @param accountId - Account identifier
+ */
+async function deleteAccount(dbPath: string, accountId: string): Promise<void> {
+  const response = await NativeModule!.deleteAccount(dbPath, accountId);
+  unwrapResult(response);
+}
+
+/**
  * Clear download state for all books (for testing).
  *
  * @param dbPath - Database path
@@ -1693,7 +1711,16 @@ async function clearBookDownloadState(
   dbPath: string,
   asin: string,
   deleteFile: boolean = false
-): Promise<{ cleared: boolean; file_deleted: boolean; deleted_path: string | null }> {
+): Promise<{
+  cleared: boolean;
+  file_deleted: boolean;
+  deleted_path: string | null;
+  cover_deleted?: boolean;
+  book_folder_deleted?: boolean;
+  author_folder_deleted?: boolean;
+  delete_error?: string | null;
+  cleanup_error?: string | null;
+}> {
   const response = await NativeModule!.clearBookDownloadState(dbPath, asin, deleteFile);
   return unwrapResult(response);
 }
@@ -1902,12 +1929,12 @@ async function requestNotificationPermission(): Promise<boolean> {
 // Exports
 // ============================================================================
 
-export default NativeModule;
+export default ExpoRustBridge;
 
 export type { OAuthFlowData };
 
 export {
-  NativeModule as ExpoRustBridge,
+  ExpoRustBridge,
   initiateOAuth,
   completeOAuthFlow,
   refreshToken,
@@ -1950,6 +1977,7 @@ export {
   // Account Storage (SQLite)
   saveAccount,
   getPrimaryAccount,
+  deleteAccount,
   // Testing
   clearDownloadState,
   getBookFilePath,

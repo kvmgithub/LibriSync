@@ -13,16 +13,17 @@ import {
   getCustomerInformation,
   saveAccount,
   getPrimaryAccount,
+  deleteAccount,
   SyncStats,
   cancelAllBackgroundTasks,
   scheduleLibrarySync,
   scheduleTokenRefresh,
 } from '../../modules/expo-rust-bridge';
 import type { Account } from '../../modules/expo-rust-bridge';
-import { Paths } from 'expo-file-system';
 import { useStyles } from '../hooks/useStyles';
 import { useTheme } from '../styles/theme';
 import type { Theme } from '../hooks/useStyles';
+import { getDatabasePath } from '../utils/appPaths';
 
 export default function SimpleAccountScreen() {
   const styles = useStyles(createStyles);
@@ -61,10 +62,7 @@ export default function SimpleAccountScreen() {
 
   const loadAccount = async () => {
     try {
-      // Get database path
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
 
       console.log('[SimpleAccountScreen] Loading account from SQLite database');
       initializeDatabase(dbPath);
@@ -77,12 +75,19 @@ export default function SimpleAccountScreen() {
         setAccount(loadedAccount);
 
         // Load token expiry
-        await loadTokenInfo();
+        await loadTokenInfo(loadedAccount);
 
         // Load previously synced book count
         await loadSyncedBooks(loadedAccount);
       } else {
         console.log('[SimpleAccountScreen] No account found in SQLite database');
+        setAccount(null);
+        setSyncStats(null);
+        setLastSyncDate(null);
+        setTokenExpiry(null);
+        setTimeRemaining(null);
+        setAccountName(null);
+        setConnectionStatus('checking');
       }
     } catch (error) {
       console.error('[SimpleAccountScreen] Failed to load account:', error);
@@ -93,9 +98,7 @@ export default function SimpleAccountScreen() {
 
   const loadSyncedBooks = async (acc: Account) => {
     try {
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
 
       console.log('[SimpleAccountScreen] Checking for synced books at:', dbPath);
 
@@ -142,15 +145,15 @@ export default function SimpleAccountScreen() {
     }
   };
 
-  const loadTokenInfo = async () => {
+  const loadTokenInfo = async (sourceAccount: Account | null = account) => {
     try {
       let expiryStr = await SecureStore.getItemAsync('token_expires_at');
 
       // If not found, try to extract from account identity
-      if (!expiryStr && account?.identity) {
+      if (!expiryStr && sourceAccount?.identity) {
         console.log('[SimpleAccountScreen] Token expiry not in SecureStore, extracting from account');
         // Access token is an object with token and expires_at properties
-        const accessToken = account.identity.access_token;
+        const accessToken = sourceAccount.identity.access_token;
         if (typeof accessToken === 'object' && accessToken.expires_at) {
           expiryStr = accessToken.expires_at;
         }
@@ -232,10 +235,7 @@ export default function SimpleAccountScreen() {
     console.log('[SimpleAccountScreen] Login successful, saving to SQLite');
 
     try {
-      // Get database path
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
 
       // Initialize database
       initializeDatabase(dbPath);
@@ -244,8 +244,13 @@ export default function SimpleAccountScreen() {
       await saveAccount(dbPath, newAccount);
       console.log('[SimpleAccountScreen] Account saved to SQLite database');
 
-      // Also keep in SecureStore for backward compatibility (can remove later)
-      await SecureStore.setItemAsync('audible_account', JSON.stringify(newAccount));
+      const expiresAt = newAccount.identity?.access_token?.expires_at;
+      if (expiresAt) {
+        await SecureStore.setItemAsync('token_expires_at', expiresAt);
+        const expiry = new Date(expiresAt);
+        setTokenExpiry(expiry);
+        updateTimeRemaining(expiry);
+      }
 
       // Update state
       setAccount(newAccount);
@@ -304,9 +309,37 @@ export default function SimpleAccountScreen() {
               console.error('[SimpleAccountScreen] Failed to cancel background tasks:', error);
             }
 
-            await SecureStore.deleteItemAsync('audible_account');
-            setAccount(null);
-            setSyncStats(null);
+            try {
+              // Delete from SQLite first; otherwise a restart/focus reload would restore the login.
+              if (account?.account_id) {
+                const dbPath = getDatabasePath();
+                initializeDatabase(dbPath);
+                await deleteAccount(dbPath, account.account_id);
+                console.log('[SimpleAccountScreen] Account deleted from SQLite database');
+              }
+
+              await Promise.all([
+                SecureStore.deleteItemAsync('audible_account'),
+                SecureStore.deleteItemAsync('token_expires_at'),
+                SecureStore.deleteItemAsync('last_sync_date'),
+                SecureStore.deleteItemAsync('audible_access_token'),
+                SecureStore.deleteItemAsync('audible_refresh_token'),
+                SecureStore.deleteItemAsync('audible_token_expires_at'),
+                SecureStore.deleteItemAsync('audible_device_serial'),
+                SecureStore.deleteItemAsync('audible_locale_code'),
+              ]);
+
+              setAccount(null);
+              setSyncStats(null);
+              setLastSyncDate(null);
+              setTokenExpiry(null);
+              setTimeRemaining(null);
+              setAccountName(null);
+              setConnectionStatus('checking');
+            } catch (error) {
+              console.error('[SimpleAccountScreen] Failed to log out:', error);
+              Alert.alert('Logout Failed', 'Could not remove the local account data.');
+            }
           },
         },
       ]
@@ -355,17 +388,12 @@ export default function SimpleAccountScreen() {
         },
       };
 
-      // Get database path
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
 
       // Save updated account to SQLite (single source of truth)
       await saveAccount(dbPath, updatedAccount);
       console.log('[SimpleAccountScreen] Updated account saved to SQLite');
 
-      // Also save to SecureStore for backward compatibility
-      await SecureStore.setItemAsync('audible_account', JSON.stringify(updatedAccount));
       await SecureStore.setItemAsync('token_expires_at', newExpiry.toISOString());
 
       // Update state
@@ -392,9 +420,7 @@ export default function SimpleAccountScreen() {
       setIsSyncing(true);
 
       // Initialize database
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
       console.log('[SimpleAccountScreen] Database path:', dbPath);
       initializeDatabase(dbPath);
 
@@ -424,7 +450,6 @@ export default function SimpleAccountScreen() {
 
             // Persist refreshed account
             await saveAccount(dbPath, syncAccount);
-            await SecureStore.setItemAsync('audible_account', JSON.stringify(syncAccount));
             await SecureStore.setItemAsync('token_expires_at', newExpiry.toISOString());
             setAccount(syncAccount);
             setTokenExpiry(newExpiry);

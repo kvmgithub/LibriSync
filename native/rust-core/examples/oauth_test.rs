@@ -11,8 +11,8 @@
 //! ```
 
 use rust_core::api::auth::{
-    generate_authorization_url, parse_authorization_callback, exchange_authorization_code,
-    Locale, PkceChallenge, OAuthState,
+    exchange_authorization_code, generate_authorization_url, parse_authorization_callback, Locale,
+    OAuthState, PkceChallenge,
 };
 use std::io::{self, Write};
 
@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .replace("-", "")
         .to_uppercase();
 
-    println!("📱 Generated Device Serial: {}\n", device_serial);
+    println!("📱 Generated device serial\n");
 
     // Step 2: Select locale
     println!("📍 Select your Audible region:");
@@ -48,14 +48,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => Locale::us(),
     };
 
-    println!("✓ Using locale: {} ({})\n", locale.name, locale.country_code);
+    println!(
+        "✓ Using locale: {} ({})\n",
+        locale.name, locale.country_code
+    );
 
     // Step 3: Generate PKCE and OAuth URL
     let pkce = PkceChallenge::generate()?;
     let state = OAuthState::generate();
 
-    println!("🔑 PKCE Verifier: {}", pkce.verifier);
-    println!("🎲 OAuth State: {}\n", state.value);
+    println!("🔑 PKCE verifier generated");
+    println!("🎲 OAuth state generated\n");
 
     let auth_url = generate_authorization_url(&locale, &device_serial, &pkce, &state)?;
 
@@ -85,12 +88,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n🔍 Parsing callback URL...");
-    println!("URL: {}\n", callback_url);
 
     // Step 5: Parse authorization code
     match parse_authorization_callback(callback_url) {
         Ok(auth_code) => {
-            println!("✅ Authorization Code: {}\n", auth_code);
+            println!("✅ Authorization code parsed\n");
 
             // Step 6: Exchange code for tokens
             println!("🔄 Exchanging authorization code for tokens...\n");
@@ -99,10 +101,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(tokens) => {
                     println!("\n🎉 SUCCESS! Authentication Complete!\n");
                     println!("{}", "=".repeat(80));
-                    println!("Access Token: {}...", &tokens.access_token[..30]);
-                    println!("Refresh Token: {}...", &tokens.refresh_token[..30]);
-                    println!("Token Type: {}", tokens.token_type);
-                    println!("Expires In: {} seconds", tokens.expires_in);
+                    println!(
+                        "Access Token: {}",
+                        if tokens.bearer.access_token.is_empty() {
+                            "missing"
+                        } else {
+                            "received"
+                        }
+                    );
+                    println!(
+                        "Refresh Token: {}",
+                        if tokens.bearer.refresh_token.is_empty() {
+                            "missing"
+                        } else {
+                            "received"
+                        }
+                    );
+                    println!("Expires In: {} seconds", tokens.bearer.expires_in);
                     println!("{}", "=".repeat(80));
                     println!("\n✨ You can now use these tokens to access your Audible library!");
                 }
@@ -117,7 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("\n❌ Failed to Parse Callback URL!");
             println!("Error: {:?}\n", e);
             println!("Expected format:");
-            println!("  https://www.amazon.com/ap/maplanding?...&openid.oa2.authorization_code=XXXXX");
+            println!(
+                "  https://www.amazon.com/ap/maplanding?...&openid.oa2.authorization_code=XXXXX"
+            );
         }
     }
 

@@ -14,6 +14,7 @@
     "ios": "npm run build:rust:ios && expo run:ios",
     "ios:dev": "expo start --ios",
     "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
     "build:rust": "./scripts/build-rust.sh",
     "build:rust:android": "./scripts/build-rust-android.sh",
     "build:rust:ios": "./scripts/build-rust-ios.sh",

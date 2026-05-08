@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Content metadata and catalog queries
 //!
 //! # Reference C# Sources
@@ -75,11 +74,11 @@
 //!
 //! Reference: DownloadOptions.Factory.cs:33 - api.GetContentMetadataAsync()
 
-use crate::error::{LibationError, Result};
 use crate::api::client::AudibleClient;
+use crate::error::{LibationError, Result};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc, NaiveDate};
 
 // ============================================================================
 // CORE TYPES - DRM and Codecs
@@ -546,7 +545,8 @@ impl AudibleClient {
     /// # use rust_core::api::client::AudibleClient;
     /// # use rust_core::api::auth::Account;
     /// # async fn example() -> rust_core::error::Result<()> {
-    /// let client = AudibleClient::new(Account::default())?;
+    /// let account = Account::new("user@example.com".to_string())?;
+    /// let client = AudibleClient::new(account)?;
     /// let product = client.get_catalog_product("B002V5D7B0").await?;
     /// println!("Title: {}", product.title);
     /// # Ok(())
@@ -568,7 +568,8 @@ impl AudibleClient {
             "series",
             "category_ladders",
             "product_extended_attrs",
-        ].join(",");
+        ]
+        .join(",");
 
         let params = vec![
             ("response_groups", response_groups),
@@ -589,18 +590,20 @@ impl AudibleClient {
 
         // Parse response
         // The API wraps the product in a "product" field
-        let product_json = response
-            .get("product")
-            .ok_or_else(|| LibationError::InvalidApiResponse {
-                message: "Missing 'product' field in response".to_string(),
-                response_body: Some(response.to_string()),
-            })?;
+        let product_json =
+            response
+                .get("product")
+                .ok_or_else(|| LibationError::InvalidApiResponse {
+                    message: "Missing 'product' field in response".to_string(),
+                    response_body: Some(response.to_string()),
+                })?;
 
-        serde_json::from_value(product_json.clone())
-            .map_err(|e| LibationError::InvalidApiResponse {
+        serde_json::from_value(product_json.clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
                 message: format!("Failed to parse catalog product: {}", e),
                 response_body: Some(product_json.to_string()),
-            })
+            }
+        })
     }
 
     /// Get multiple products in a single batch request
@@ -628,20 +631,26 @@ impl AudibleClient {
     /// # use rust_core::api::client::AudibleClient;
     /// # use rust_core::api::auth::Account;
     /// # async fn example() -> rust_core::error::Result<()> {
-    /// let client = AudibleClient::new(Account::default())?;
+    /// let account = Account::new("user@example.com".to_string())?;
+    /// let client = AudibleClient::new(account)?;
     /// let asins = vec!["B002V5D7B0".to_string(), "B002V1O97Y".to_string()];
     /// let products = client.get_catalog_products_batch(asins).await?;
     /// println!("Retrieved {} products", products.len());
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_catalog_products_batch(&self, asins: Vec<String>) -> Result<Vec<CatalogProduct>> {
+    pub async fn get_catalog_products_batch(
+        &self,
+        asins: Vec<String>,
+    ) -> Result<Vec<CatalogProduct>> {
         // Validate batch size (max 50 per request)
         // Reference: ApiExtended.cs:24 - BatchSize = 50
         if asins.len() > crate::api::client::BATCH_SIZE {
-            return Err(LibationError::invalid_input(
-                format!("Too many ASINs in batch: {} (max {})", asins.len(), crate::api::client::BATCH_SIZE)
-            ));
+            return Err(LibationError::invalid_input(format!(
+                "Too many ASINs in batch: {} (max {})",
+                asins.len(),
+                crate::api::client::BATCH_SIZE
+            )));
         }
 
         if asins.is_empty() {
@@ -663,7 +672,8 @@ impl AudibleClient {
             "series",
             "category_ladders",
             "product_extended_attrs",
-        ].join(",");
+        ]
+        .join(",");
 
         // Build query with comma-separated ASINs
         let asin_param = asins.join(",");
@@ -736,10 +746,13 @@ impl AudibleClient {
     /// # use rust_core::api::client::AudibleClient;
     /// # use rust_core::api::auth::Account;
     /// # async fn example() -> rust_core::error::Result<()> {
-    /// let client = AudibleClient::new(Account::default())?;
+    /// let account = Account::new("user@example.com".to_string())?;
+    /// let client = AudibleClient::new(account)?;
     /// let metadata = client.get_content_metadata("B002V5D7B0").await?;
-    /// println!("Runtime: {} minutes", metadata.chapter_info.runtime_length_ms / 60000);
-    /// println!("Chapters: {}", metadata.chapter_info.chapters.len());
+    /// if let Some(chapter_info) = metadata.chapter_info {
+    ///     println!("Runtime: {} minutes", chapter_info.runtime_length_ms / 60000);
+    ///     println!("Chapters: {}", chapter_info.chapters.len());
+    /// }
     /// # Ok(())
     /// # }
     /// ```
@@ -750,15 +763,14 @@ impl AudibleClient {
 
         // Parse metadata
         // The API may wrap in a "content_metadata" field or return directly
-        let metadata_json = response
-            .get("content_metadata")
-            .unwrap_or(&response);
+        let metadata_json = response.get("content_metadata").unwrap_or(&response);
 
-        serde_json::from_value(metadata_json.clone())
-            .map_err(|e| LibationError::InvalidApiResponse {
+        serde_json::from_value(metadata_json.clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
                 message: format!("Failed to parse content metadata: {}", e),
                 response_body: Some(metadata_json.to_string()),
-            })
+            }
+        })
     }
 }
 

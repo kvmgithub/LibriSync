@@ -7,7 +7,7 @@ import org.json.JSONObject
 import org.json.JSONArray
 import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
+import android.provider.DocumentsContract
 import expo.modules.rustbridge.workers.WorkerScheduler
 import java.io.File
 
@@ -509,8 +509,7 @@ class ExpoRustBridgeModule : Module() {
     AsyncFunction("enqueueDownloadNew") { asin: String, title: String, author: String?, accountJson: String, outputDirectory: String, quality: String ->
       try {
         val context = appContext.reactContext ?: throw Exception("Context not available")
-        val cacheDir = context.cacheDir
-        val dbPath = File(cacheDir, "audible.db").absolutePath
+        val dbPath = AppPaths.databasePath(context)
 
         // Use DownloadService for downloads
         DownloadService.enqueueBook(
@@ -625,6 +624,25 @@ class ExpoRustBridgeModule : Module() {
           put("db_path", dbPath)
         }
         val result = nativeGetPrimaryAccount(params.toString())
+        parseJsonResponse(result)
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
+    /**
+     * Delete account from SQLite database.
+     *
+     * @param dbPath Database path
+     * @param accountId Account identifier
+     */
+    AsyncFunction("deleteAccount") { dbPath: String, accountId: String ->
+      try {
+        val params = JSONObject().apply {
+          put("db_path", dbPath)
+          put("account_id", accountId)
+        }
+        val result = nativeDeleteAccount(params.toString())
         parseJsonResponse(result)
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
@@ -873,13 +891,54 @@ class ExpoRustBridgeModule : Module() {
      */
     AsyncFunction("clearBookDownloadState") { dbPath: String, asin: String, deleteFile: Boolean ->
       try {
+        val context = appContext.reactContext ?: throw Exception("Context not available")
+        var cleanupResult = DeleteCleanupResult(fileDeleted = false)
+        var deleteError: String? = null
+        var rustShouldDeleteFile = deleteFile
+
+        if (deleteFile) {
+          val filePath = getBookFilePathForDeletion(dbPath, asin)
+          if (!filePath.isNullOrBlank()) {
+            rustShouldDeleteFile = false
+            try {
+              cleanupResult = deleteDownloadedFile(context, filePath)
+              if (!cleanupResult.fileDeleted) {
+                deleteError = "File deletion returned false"
+              }
+            } catch (e: Exception) {
+              deleteError = e.message ?: e.javaClass.simpleName
+              android.util.Log.w("ExpoRustBridge", "Failed to delete downloaded file $filePath", e)
+            }
+          }
+        }
+
         val params = JSONObject().apply {
           put("db_path", dbPath)
           put("asin", asin)
-          put("delete_file", deleteFile)
+          put("delete_file", rustShouldDeleteFile)
         }
         val result = nativeClearBookDownloadState(params.toString())
-        parseJsonResponse(result)
+        val parsed = parseJsonResponse(result)
+
+        if (deleteFile && !rustShouldDeleteFile && parsed["success"] == true) {
+          val data = mutableMapOf<String, Any?>()
+          (parsed["data"] as? Map<*, *>)?.forEach { (key, value) ->
+            if (key is String) {
+              data[key] = value
+            }
+          }
+          data["file_deleted"] = cleanupResult.fileDeleted
+          data["deleted_path"] = cleanupResult.deletedPath
+          data["cover_deleted"] = cleanupResult.coverDeleted
+          data["book_folder_deleted"] = cleanupResult.bookFolderDeleted
+          data["author_folder_deleted"] = cleanupResult.authorFolderDeleted
+          cleanupResult.cleanupError?.let { data["cleanup_error"] = it }
+          deleteError?.let { data["delete_error"] = it }
+
+          mapOf("success" to true, "data" to data)
+        } else {
+          parsed
+        }
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
       }
@@ -922,20 +981,17 @@ class ExpoRustBridgeModule : Module() {
      * @param audioFilePath Path to the audio file (cover will be saved in same directory)
      */
     AsyncFunction("createCoverArtFile") { asin: String, coverUrl: String, audioFilePath: String ->
+      var coverFile: File? = null
+      var originalBitmap: android.graphics.Bitmap? = null
+      var resizedBitmap: android.graphics.Bitmap? = null
+
       try {
         val context = appContext.reactContext ?: throw Exception("Context not available")
 
-        // Get the directory containing the audio file
-        val audioUri = Uri.parse(if (audioFilePath.startsWith("content://")) audioFilePath else "file://$audioFilePath")
-        val audioFile = DocumentFile.fromSingleUri(context, audioUri)
-          ?: throw Exception("Could not access audio file")
-
-        val targetDir = audioFile.parentFile
-          ?: throw Exception("Could not access parent directory")
-
         // Download cover image to cache
         val cacheDir = context.cacheDir
-        val coverFile = File(cacheDir, "cover_$asin.jpg")
+        val cacheCoverFile = File(cacheDir, "cover_$asin.jpg")
+        coverFile = cacheCoverFile
 
         // Download the cover image
         val url = java.net.URL(coverUrl.replace(Regex("_SL\\d+_"), "_SL500_"))
@@ -948,49 +1004,42 @@ class ExpoRustBridgeModule : Module() {
           throw Exception("Failed to download cover image: HTTP ${connection.responseCode}")
         }
 
-        coverFile.outputStream().use { output ->
+        cacheCoverFile.outputStream().use { output ->
           connection.inputStream.use { input ->
             input.copyTo(output)
           }
         }
 
         // Load and resize cover image
-        val originalBitmap = android.graphics.BitmapFactory.decodeFile(coverFile.absolutePath)
+        val original = android.graphics.BitmapFactory.decodeFile(cacheCoverFile.absolutePath)
           ?: throw Exception("Failed to decode cover image")
+        originalBitmap = original
 
-        val resizedBitmap = android.graphics.Bitmap.createScaledBitmap(
-          originalBitmap,
+        val resized = android.graphics.Bitmap.createScaledBitmap(
+          original,
           500,
           500,
           true
         )
+        resizedBitmap = resized
 
-        // Delete existing EmbeddedCover.jpg if present
-        targetDir.findFile("EmbeddedCover.jpg")?.delete()
-
-        // Create new file
-        val embeddedCover = targetDir.createFile("image/jpeg", "EmbeddedCover.jpg")
-          ?: throw Exception("Failed to create EmbeddedCover.jpg")
-
-        // Write JPEG
-        context.contentResolver.openOutputStream(embeddedCover.uri)?.use { outputStream ->
-          resizedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, outputStream)
-        } ?: throw Exception("Failed to open output stream for EmbeddedCover.jpg")
-
-        // Cleanup
-        originalBitmap.recycle()
-        resizedBitmap.recycle()
-        coverFile.delete()
+        val coverPath = writeEmbeddedCover(context, audioFilePath, resized)
 
         mapOf(
           "success" to true,
           "data" to mapOf(
-            "coverPath" to embeddedCover.uri.toString(),
+            "coverPath" to coverPath,
             "message" to "Cover art created successfully"
           )
         )
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
+      } finally {
+        if (resizedBitmap != originalBitmap) {
+          resizedBitmap?.recycle()
+        }
+        originalBitmap?.recycle()
+        coverFile?.delete()
       }
     }
 
@@ -1279,6 +1328,384 @@ class ExpoRustBridgeModule : Module() {
     }
   }
 
+  private data class DeleteCleanupResult(
+    val fileDeleted: Boolean,
+    val deletedPath: String? = null,
+    val coverDeleted: Boolean = false,
+    val bookFolderDeleted: Boolean = false,
+    val authorFolderDeleted: Boolean = false,
+    val cleanupError: String? = null
+  )
+
+  private data class TreeDocumentContext(
+    val treeUri: Uri,
+    val treeDocumentId: String,
+    val documentId: String,
+    val parentDocumentId: String?
+  )
+
+  private data class DocumentChild(
+    val documentId: String,
+    val displayName: String,
+    val mimeType: String?
+  )
+
+  private fun getBookFilePathForDeletion(dbPath: String, asin: String): String? {
+    val params = JSONObject().apply {
+      put("db_path", dbPath)
+      put("asin", asin)
+    }
+    val parsed = parseJsonResponse(nativeGetBookFilePath(params.toString()))
+    if (parsed["success"] != true) {
+      return null
+    }
+
+    val data = parsed["data"] as? Map<*, *> ?: return null
+    return data["file_path"] as? String
+  }
+
+  private fun deleteDownloadedFile(context: Context, filePath: String): DeleteCleanupResult {
+    return if (filePath.startsWith("content://")) {
+      deleteContentDocument(context, Uri.parse(filePath), filePath)
+    } else {
+      deleteFilePath(filePath)
+    }
+  }
+
+  private fun deleteFilePath(filePath: String): DeleteCleanupResult {
+    val file = File(filePath.removePrefix("file://"))
+    val fileDeleted = file.exists() && file.delete()
+
+    return DeleteCleanupResult(
+      fileDeleted = fileDeleted,
+      deletedPath = if (fileDeleted) filePath else null
+    )
+  }
+
+  private fun deleteContentDocument(context: Context, uri: Uri, originalPath: String): DeleteCleanupResult {
+    val resolver = context.contentResolver
+    val documentId = try {
+      DocumentsContract.getDocumentId(uri)
+    } catch (_: Exception) {
+      null
+    }
+    val treeContext = documentId?.let { findTreeDocumentContext(context, it) }
+    var fileDeleted = false
+
+    try {
+      if (DocumentsContract.isDocumentUri(context, uri) && DocumentsContract.deleteDocument(resolver, uri)) {
+        fileDeleted = true
+      }
+    } catch (e: Exception) {
+      android.util.Log.d("ExpoRustBridge", "Direct document delete failed for $uri: ${e.message}")
+    }
+
+    if (!fileDeleted && treeContext != null) {
+      try {
+        fileDeleted = deleteDocumentById(context, treeContext.treeUri, treeContext.documentId)
+      } catch (e: Exception) {
+        android.util.Log.d("ExpoRustBridge", "Tree document delete failed for $uri: ${e.message}")
+      }
+    }
+
+    if (!fileDeleted) {
+      fileDeleted = try {
+        resolver.delete(uri, null, null) > 0
+      } catch (e: Exception) {
+        android.util.Log.d("ExpoRustBridge", "Content resolver delete failed for $uri: ${e.message}")
+        false
+      }
+    }
+
+    if (!fileDeleted) {
+      return DeleteCleanupResult(fileDeleted = false)
+    }
+
+    var coverDeleted = false
+    var bookFolderDeleted = false
+    var authorFolderDeleted = false
+    var cleanupError: String? = null
+
+    if (treeContext?.parentDocumentId != null) {
+      try {
+        val cleanup = cleanupDeletedContentDocument(context, treeContext)
+        coverDeleted = cleanup.coverDeleted
+        bookFolderDeleted = cleanup.bookFolderDeleted
+        authorFolderDeleted = cleanup.authorFolderDeleted
+      } catch (e: Exception) {
+        cleanupError = e.message ?: e.javaClass.simpleName
+        android.util.Log.w("ExpoRustBridge", "Downloaded-file cleanup failed for $uri", e)
+      }
+    }
+
+    return DeleteCleanupResult(
+      fileDeleted = true,
+      deletedPath = originalPath,
+      coverDeleted = coverDeleted,
+      bookFolderDeleted = bookFolderDeleted,
+      authorFolderDeleted = authorFolderDeleted,
+      cleanupError = cleanupError
+    )
+  }
+
+  private fun cleanupDeletedContentDocument(
+    context: Context,
+    treeContext: TreeDocumentContext
+  ): DeleteCleanupResult {
+    val parentId = treeContext.parentDocumentId ?: return DeleteCleanupResult(fileDeleted = true)
+    var coverDeleted = false
+    var bookFolderDeleted = false
+    var authorFolderDeleted = false
+
+    val siblingsAfterFileDelete = listDocumentChildren(context, treeContext.treeUri, parentId)
+    val hasOtherAudioFiles = siblingsAfterFileDelete.any { child ->
+      child.documentId != treeContext.documentId && isAudioFile(child.displayName, child.mimeType)
+    }
+
+    if (!hasOtherAudioFiles) {
+      val cover = siblingsAfterFileDelete.firstOrNull { it.displayName == "EmbeddedCover.jpg" }
+      if (cover != null) {
+        coverDeleted = deleteDocumentById(context, treeContext.treeUri, cover.documentId)
+      }
+    }
+
+    if (parentId != treeContext.treeDocumentId &&
+        isDocumentDirectoryEmpty(context, treeContext.treeUri, parentId)) {
+      bookFolderDeleted = deleteDocumentById(context, treeContext.treeUri, parentId)
+
+      if (bookFolderDeleted) {
+        val authorDocumentId = getParentDocumentId(parentId)
+        if (!authorDocumentId.isNullOrBlank() &&
+            authorDocumentId != treeContext.treeDocumentId &&
+            isDocumentDirectoryEmpty(context, treeContext.treeUri, authorDocumentId)) {
+          authorFolderDeleted = deleteDocumentById(context, treeContext.treeUri, authorDocumentId)
+        }
+      }
+    }
+
+    return DeleteCleanupResult(
+      fileDeleted = true,
+      coverDeleted = coverDeleted,
+      bookFolderDeleted = bookFolderDeleted,
+      authorFolderDeleted = authorFolderDeleted
+    )
+  }
+
+  private fun findTreeDocumentContext(context: Context, documentId: String): TreeDocumentContext? {
+    return context.contentResolver.persistedUriPermissions
+      .filter { it.isWritePermission }
+      .mapNotNull { permission ->
+        val treeDocumentId = try {
+          DocumentsContract.getTreeDocumentId(permission.uri)
+        } catch (_: Exception) {
+          null
+        }
+
+        if (!treeDocumentId.isNullOrBlank() && isDocumentWithinTree(documentId, treeDocumentId)) {
+          TreeDocumentContext(
+            treeUri = permission.uri,
+            treeDocumentId = treeDocumentId,
+            documentId = documentId,
+            parentDocumentId = getParentDocumentId(documentId)
+          )
+        } else {
+          null
+        }
+      }
+      .maxByOrNull { it.treeDocumentId.length }
+  }
+
+  private fun isDocumentWithinTree(documentId: String, treeDocumentId: String): Boolean {
+    return documentId == treeDocumentId ||
+      documentId.startsWith("$treeDocumentId/") ||
+      (treeDocumentId.endsWith(":") && documentId.startsWith(treeDocumentId))
+  }
+
+  private fun getParentDocumentId(documentId: String): String? {
+    val index = documentId.lastIndexOf('/')
+    return if (index > 0) documentId.substring(0, index) else null
+  }
+
+  private fun listDocumentChildren(
+    context: Context,
+    treeUri: Uri,
+    parentDocumentId: String
+  ): List<DocumentChild> {
+    val resolver = context.contentResolver
+    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocumentId)
+    val projection = arrayOf(
+      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+      DocumentsContract.Document.COLUMN_MIME_TYPE
+    )
+    val children = mutableListOf<DocumentChild>()
+
+    resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+      val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+      val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+      val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+      while (cursor.moveToNext()) {
+        children.add(
+          DocumentChild(
+            documentId = cursor.getString(idColumn),
+            displayName = cursor.getString(nameColumn),
+            mimeType = cursor.getString(mimeColumn)
+          )
+        )
+      }
+    }
+
+    return children
+  }
+
+  private fun isDocumentDirectoryEmpty(context: Context, treeUri: Uri, documentId: String): Boolean {
+    return listDocumentChildren(context, treeUri, documentId).isEmpty()
+  }
+
+  private fun deleteDocumentById(context: Context, treeUri: Uri, documentId: String): Boolean {
+    val documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+    return DocumentsContract.deleteDocument(context.contentResolver, documentUri)
+  }
+
+  private fun isAudioFile(displayName: String, mimeType: String?): Boolean {
+    if (mimeType?.startsWith("audio/") == true) {
+      return true
+    }
+
+    val lowerName = displayName.lowercase()
+    return lowerName.endsWith(".m4b") ||
+      lowerName.endsWith(".m4a") ||
+      lowerName.endsWith(".mp4") ||
+      lowerName.endsWith(".mp3") ||
+      lowerName.endsWith(".aac") ||
+      lowerName.endsWith(".flac") ||
+      lowerName.endsWith(".ogg") ||
+      lowerName.endsWith(".opus") ||
+      lowerName.endsWith(".wav") ||
+      lowerName.endsWith(".aax") ||
+      lowerName.endsWith(".aaxc")
+  }
+
+  private fun writeEmbeddedCover(
+    context: Context,
+    audioFilePath: String,
+    bitmap: android.graphics.Bitmap
+  ): String {
+    return if (audioFilePath.startsWith("content://")) {
+      writeEmbeddedCoverToDocumentTree(context, Uri.parse(audioFilePath), bitmap)
+    } else {
+      val path = audioFilePath.removePrefix("file://")
+      val targetDir = File(path).parentFile
+        ?: throw Exception("Could not access parent directory")
+
+      if (!targetDir.exists() || !targetDir.isDirectory) {
+        throw Exception("Could not access parent directory")
+      }
+
+      if (!targetDir.canWrite()) {
+        throw Exception("No write permission for parent directory")
+      }
+
+      val embeddedCover = File(targetDir, "EmbeddedCover.jpg")
+      if (embeddedCover.exists() && !embeddedCover.delete()) {
+        throw Exception("Failed to delete existing EmbeddedCover.jpg")
+      }
+
+      embeddedCover.outputStream().use { outputStream ->
+        if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, outputStream)) {
+          throw Exception("Failed to write EmbeddedCover.jpg")
+        }
+      }
+
+      embeddedCover.absolutePath
+    }
+  }
+
+  private fun writeEmbeddedCoverToDocumentTree(
+    context: Context,
+    audioUri: Uri,
+    bitmap: android.graphics.Bitmap
+  ): String {
+    val resolver = context.contentResolver
+    val documentId = try {
+      DocumentsContract.getDocumentId(audioUri)
+    } catch (_: Exception) {
+      null
+    }
+
+    val treeDocumentId = try {
+      DocumentsContract.getTreeDocumentId(audioUri)
+    } catch (_: Exception) {
+      null
+    }
+
+    if (documentId.isNullOrBlank() || treeDocumentId.isNullOrBlank()) {
+      throw Exception(
+        "Cannot create EmbeddedCover.jpg next to this file because Android only granted access to the file, not its folder."
+      )
+    }
+
+    val parentDocumentId = if (documentId.contains('/')) {
+      documentId.substringBeforeLast('/')
+    } else if (documentId != treeDocumentId) {
+      treeDocumentId
+    } else {
+      ""
+    }
+    if (parentDocumentId.isBlank()) {
+      throw Exception("Could not access parent directory")
+    }
+
+    deleteDocumentInDirectory(context, audioUri, parentDocumentId, "EmbeddedCover.jpg")
+
+    val parentUri = DocumentsContract.buildDocumentUriUsingTree(audioUri, parentDocumentId)
+    val embeddedCoverUri = DocumentsContract.createDocument(
+      resolver,
+      parentUri,
+      "image/jpeg",
+      "EmbeddedCover.jpg"
+    ) ?: throw Exception("Failed to create EmbeddedCover.jpg")
+
+    resolver.openOutputStream(embeddedCoverUri)?.use { outputStream ->
+      if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, outputStream)) {
+        throw Exception("Failed to write EmbeddedCover.jpg")
+      }
+    } ?: throw Exception("Failed to open output stream for EmbeddedCover.jpg")
+
+    return embeddedCoverUri.toString()
+  }
+
+  private fun deleteDocumentInDirectory(
+    context: Context,
+    treeUri: Uri,
+    parentDocumentId: String,
+    displayName: String
+  ) {
+    val resolver = context.contentResolver
+    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocumentId)
+    val projection = arrayOf(
+      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+      DocumentsContract.Document.COLUMN_DISPLAY_NAME
+    )
+
+    resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+      val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+      val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+
+      while (cursor.moveToNext()) {
+        if (cursor.getString(nameColumn) == displayName) {
+          val childDocumentId = cursor.getString(idColumn)
+          val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocumentId)
+
+          if (!DocumentsContract.deleteDocument(resolver, childUri)) {
+            throw Exception("Failed to delete existing $displayName")
+          }
+        }
+      }
+    }
+  }
+
   // ============================================================================
   // COMPANION OBJECT
   // ============================================================================
@@ -1335,6 +1762,7 @@ class ExpoRustBridgeModule : Module() {
     // Account functions
     @JvmStatic external fun nativeSaveAccount(paramsJson: String): String
     @JvmStatic external fun nativeGetPrimaryAccount(paramsJson: String): String
+    @JvmStatic external fun nativeDeleteAccount(paramsJson: String): String
 
     // Testing functions
     @JvmStatic external fun nativeClearDownloadState(paramsJson: String): String

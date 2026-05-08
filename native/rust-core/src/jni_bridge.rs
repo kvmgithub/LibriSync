@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! JNI bridge for Android - Exposes Rust core functionality to React Native
 //!
 //! This module provides JNI wrapper functions that expose the Rust core
@@ -55,8 +54,8 @@ use jni::JNIEnv;
 use serde::{Deserialize, Serialize};
 use std::panic::{self, AssertUnwindSafe};
 
-use std::sync::Mutex;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 // Lazy static tokio runtime for async operations
 lazy_static::lazy_static! {
@@ -69,7 +68,9 @@ lazy_static::lazy_static! {
 }
 
 /// Get or create a download manager for the given database path
-async fn get_or_create_manager(db_path: &str) -> crate::Result<std::sync::Arc<crate::download::PersistentDownloadManager>> {
+async fn get_or_create_manager(
+    db_path: &str,
+) -> crate::Result<std::sync::Arc<crate::download::PersistentDownloadManager>> {
     let mut managers = DOWNLOAD_MANAGERS.lock().unwrap();
 
     if let Some(manager) = managers.get(db_path) {
@@ -81,7 +82,8 @@ async fn get_or_create_manager(db_path: &str) -> crate::Result<std::sync::Arc<cr
     let manager = crate::download::PersistentDownloadManager::new(
         std::sync::Arc::new(db.pool().clone()),
         3, // max concurrent downloads
-    ).await?;
+    )
+    .await?;
 
     // On fresh process start, mark stuck conversion tasks as failed
     manager.resume_all_pending().await?;
@@ -98,9 +100,9 @@ async fn get_or_create_manager(db_path: &str) -> crate::Result<std::sync::Arc<cr
 
 /// Convert JString to Rust String
 fn jstring_to_string(env: &mut JNIEnv, jstr: JString) -> crate::Result<String> {
-    env.get_string(&jstr)
-        .map(|s| s.into())
-        .map_err(|e| crate::LibationError::InvalidInput(format!("JNI string conversion failed: {}", e)))
+    env.get_string(&jstr).map(|s| s.into()).map_err(|e| {
+        crate::LibationError::InvalidInput(format!("JNI string conversion failed: {}", e))
+    })
 }
 
 /// Convert Rust result to JSON response string
@@ -109,11 +111,13 @@ fn result_to_json<T: Serialize>(result: crate::Result<T>) -> String {
         Ok(data) => serde_json::json!({
             "success": true,
             "data": data
-        }).to_string(),
+        })
+        .to_string(),
         Err(e) => serde_json::json!({
             "success": false,
             "error": e.to_string()
-        }).to_string(),
+        })
+        .to_string(),
     }
 }
 
@@ -122,7 +126,8 @@ fn success_response<T: Serialize>(data: T) -> String {
     serde_json::json!({
         "success": true,
         "data": data
-    }).to_string()
+    })
+    .to_string()
 }
 
 /// Create error response JSON
@@ -130,7 +135,8 @@ fn error_response(error: &str) -> String {
     serde_json::json!({
         "success": false,
         "error": error
-    }).to_string()
+    })
+    .to_string()
 }
 
 /// Wrap a function call with panic catching
@@ -212,7 +218,8 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGenera
     let params_str = match jstring_to_string(&mut env, params_json) {
         Ok(s) => s,
         Err(e) => {
-            return env.new_string(error_response(&e.to_string()))
+            return env
+                .new_string(error_response(&e.to_string()))
                 .expect("Failed to create Java string")
                 .into_raw();
         }
@@ -231,7 +238,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGenera
 
             // Get locale
             let locale = crate::api::auth::Locale::from_country_code(&params.locale_code)
-                .ok_or_else(|| crate::LibationError::InvalidInput(format!("Invalid locale: {}", params.locale_code)))?;
+                .ok_or_else(|| {
+                    crate::LibationError::InvalidInput(format!(
+                        "Invalid locale: {}",
+                        params.locale_code
+                    ))
+                })?;
 
             // Generate PKCE and state
             let pkce = crate::api::auth::PkceChallenge::generate()?;
@@ -374,7 +386,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeExchan
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
             let locale = crate::api::auth::Locale::from_country_code(&params.locale_code)
-                .ok_or_else(|| crate::LibationError::InvalidInput(format!("Invalid locale: {}", params.locale_code)))?;
+                .ok_or_else(|| {
+                    crate::LibationError::InvalidInput(format!(
+                        "Invalid locale: {}",
+                        params.locale_code
+                    ))
+                })?;
 
             let pkce = crate::api::auth::PkceChallenge {
                 verifier: params.pkce_verifier,
@@ -388,7 +405,8 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeExchan
                     &params.authorization_code,
                     &params.device_serial,
                     &pkce,
-                ).await
+                )
+                .await
             })?;
 
             Ok(success_response(result))
@@ -448,14 +466,20 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeRefres
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
             let locale = crate::api::auth::Locale::from_country_code(&params.locale_code)
-                .ok_or_else(|| crate::LibationError::InvalidInput(format!("Invalid locale: {}", params.locale_code)))?;
+                .ok_or_else(|| {
+                    crate::LibationError::InvalidInput(format!(
+                        "Invalid locale: {}",
+                        params.locale_code
+                    ))
+                })?;
 
             let result = RUNTIME.block_on(async {
                 crate::api::auth::refresh_access_token(
                     &locale,
                     &params.refresh_token,
                     &params.device_serial,
-                ).await
+                )
+                .await
             })?;
 
             Ok(success_response(result))
@@ -525,9 +549,13 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeEnsure
                 let db = crate::storage::Database::new(&params.db_path).await?;
 
                 // Parse original account to get expiry before refresh
-                let original_account: crate::api::auth::Account = serde_json::from_str(&params.account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
-                let original_expiry = original_account.identity.as_ref()
+                let original_account: crate::api::auth::Account =
+                    serde_json::from_str(&params.account_json).map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
+                let original_expiry = original_account
+                    .identity
+                    .as_ref()
                     .map(|i| i.access_token.expires_at);
 
                 // Ensure token is valid
@@ -535,12 +563,17 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeEnsure
                     db.pool(),
                     &params.account_json,
                     params.refresh_threshold_minutes,
-                ).await?;
+                )
+                .await?;
 
                 // Parse updated account to get new expiry
-                let updated_account: crate::api::auth::Account = serde_json::from_str(&account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
-                let new_expiry = updated_account.identity.as_ref()
+                let updated_account: crate::api::auth::Account =
+                    serde_json::from_str(&account_json).map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
+                let new_expiry = updated_account
+                    .identity
+                    .as_ref()
                     .map(|i| i.access_token.expires_at);
 
                 let was_refreshed = original_expiry != new_expiry;
@@ -605,7 +638,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetAct
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
             let locale = crate::api::auth::Locale::from_country_code(&params.locale_code)
-                .ok_or_else(|| crate::LibationError::InvalidInput(format!("Invalid locale: {}", params.locale_code)))?;
+                .ok_or_else(|| {
+                    crate::LibationError::InvalidInput(format!(
+                        "Invalid locale: {}",
+                        params.locale_code
+                    ))
+                })?;
 
             let result = RUNTIME.block_on(async {
                 crate::api::auth::get_activation_bytes(&locale, &params.access_token).await
@@ -677,7 +715,9 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeSyncLi
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
             let account: crate::api::auth::Account = serde_json::from_str(&params.account_json)
-                .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
+                .map_err(|e| {
+                    crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                })?;
 
             let result = RUNTIME.block_on(async {
                 let db = crate::storage::Database::new(&params.db_path).await?;
@@ -756,10 +796,13 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeSyncLi
                     db.pool(),
                     &params.account_json,
                     30, // Refresh if expiring within 30 minutes
-                ).await?;
+                )
+                .await?;
 
                 let account: crate::api::auth::Account = serde_json::from_str(&account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
+                    .map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
 
                 let mut client = crate::api::client::AudibleClient::new(account.clone())?;
 
@@ -822,7 +865,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
 
             let result = RUNTIME.block_on(async {
                 let db = crate::storage::Database::new(&params.db_path).await?;
-                let books = crate::storage::queries::list_books_with_relations(db.pool(), params.limit, params.offset).await?;
+                let books = crate::storage::queries::list_books_with_relations(
+                    db.pool(),
+                    params.limit,
+                    params.offset,
+                )
+                .await?;
                 let total_count = crate::storage::queries::count_books(db.pool()).await?;
 
                 // Convert BookWithRelations to JSON with arrays for authors/narrators
@@ -922,7 +970,11 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
 
             let result = RUNTIME.block_on(async {
                 let db = crate::storage::Database::new(&params.db_path).await?;
-                let book = crate::storage::queries::find_book_with_relations_by_asin(db.pool(), &params.asin).await?;
+                let book = crate::storage::queries::find_book_with_relations_by_asin(
+                    db.pool(),
+                    &params.asin,
+                )
+                .await?;
 
                 if let Some(book) = book {
                     let book_json = serde_json::json!({
@@ -960,7 +1012,10 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                     });
                     Ok::<_, crate::LibationError>(book_json)
                 } else {
-                    Err(crate::LibationError::not_found(format!("Book not found: {}", params.asin)))
+                    Err(crate::LibationError::not_found(format!(
+                        "Book not found: {}",
+                        params.asin
+                    )))
                 }
             })?;
 
@@ -1023,7 +1078,8 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeSearch
                     db.pool(),
                     &params.query,
                     params.limit,
-                ).await?;
+                )
+                .await?;
 
                 let response = serde_json::json!({
                     "books": books,
@@ -1130,8 +1186,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                     };
                 }
 
-                let books = crate::storage::queries::list_books_with_filters(db.pool(), &query_params).await?;
-                let total_count = crate::storage::queries::count_books_with_filters(db.pool(), &query_params).await?;
+                let books =
+                    crate::storage::queries::list_books_with_filters(db.pool(), &query_params)
+                        .await?;
+                let total_count =
+                    crate::storage::queries::count_books_with_filters(db.pool(), &query_params)
+                        .await?;
 
                 // Convert BookWithRelations to JSON with arrays for authors/narrators
                 let books_json: Vec<serde_json::Value> = books.iter().map(|book| {
@@ -1384,7 +1444,8 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeDecryp
             let params: Params = serde_json::from_str(&params_str)
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
-            let activation_bytes = crate::crypto::activation::ActivationBytes::from_hex(&params.activation_bytes)?;
+            let activation_bytes =
+                crate::crypto::activation::ActivationBytes::from_hex(&params.activation_bytes)?;
 
             let result = RUNTIME.block_on(async {
                 let decrypter = crate::crypto::aax::AaxDecrypter::new(activation_bytes);
@@ -1523,7 +1584,9 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeValida
             let params: Params = serde_json::from_str(&params_str)
                 .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
 
-            let valid = crate::crypto::activation::ActivationBytes::from_hex(&params.activation_bytes).is_ok();
+            let valid =
+                crate::crypto::activation::ActivationBytes::from_hex(&params.activation_bytes)
+                    .is_ok();
 
             let response = serde_json::json!({
                 "valid": valid,
@@ -1625,15 +1688,22 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeBuildF
             let result = RUNTIME.block_on(async {
                 // Get book metadata
                 let db = crate::storage::Database::new(&params.db_path).await?;
-                let book = crate::storage::queries::find_book_with_relations_by_asin(db.pool(), &params.asin).await?
-                    .ok_or_else(|| crate::LibationError::not_found(format!("Book not found: {}", params.asin)))?;
+                let book = crate::storage::queries::find_book_with_relations_by_asin(
+                    db.pool(),
+                    &params.asin,
+                )
+                .await?
+                .ok_or_else(|| {
+                    crate::LibationError::not_found(format!("Book not found: {}", params.asin))
+                })?;
 
                 // Convert to AudioMetadata
                 let metadata = book.to_audio_metadata();
 
                 // Parse naming pattern
-                let pattern = crate::file::paths::NamingPattern::from_string(&params.naming_pattern)
-                    .unwrap_or(crate::file::paths::NamingPattern::AuthorSeriesBook);
+                let pattern =
+                    crate::file::paths::NamingPattern::from_string(&params.naming_pattern)
+                        .unwrap_or(crate::file::paths::NamingPattern::AuthorSeriesBook);
 
                 // Build path
                 let file_path = crate::file::paths::build_file_path(&metadata, pattern, "m4b")?;
@@ -1709,7 +1779,12 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetCus
                     "es" => crate::api::auth::Locale::es(),
                     "in" => crate::api::auth::Locale::in_(),
                     "jp" => crate::api::auth::Locale::jp(),
-                    _ => return Err(crate::LibationError::InvalidInput(format!("Unknown locale: {}", params.locale_code))),
+                    _ => {
+                        return Err(crate::LibationError::InvalidInput(format!(
+                            "Unknown locale: {}",
+                            params.locale_code
+                        )))
+                    }
                 };
 
                 // Create identity with access token
@@ -1810,7 +1885,9 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeDownlo
 
                 // Parse account
                 let account: crate::api::auth::Account = serde_json::from_str(&params.account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
+                    .map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
 
                 // Parse quality
                 let quality = match params.quality.as_str() {
@@ -1825,27 +1902,38 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeDownlo
                 let client = crate::api::client::AudibleClient::new(account)?;
 
                 // Get download license
-                let license = client.build_download_license(&params.asin, quality, false).await?;
+                let license = client
+                    .build_download_license(&params.asin, quality, false)
+                    .await?;
 
                 // Extract AAXC keys
                 let (key_hex, iv_hex) = if let Some(ref keys) = license.decryption_keys {
                     if !keys.is_empty() && keys[0].key_part_1.len() == 16 {
-                        let key = keys[0].key_part_1.iter()
+                        let key = keys[0]
+                            .key_part_1
+                            .iter()
                             .map(|b| format!("{:02x}", b))
                             .collect::<String>();
                         let iv = if let Some(ref iv_bytes) = keys[0].key_part_2 {
-                            iv_bytes.iter()
+                            iv_bytes
+                                .iter()
                                 .map(|b| format!("{:02x}", b))
                                 .collect::<String>()
                         } else {
-                            return Err(crate::LibationError::InvalidInput("No IV in AAXC keys".to_string()));
+                            return Err(crate::LibationError::InvalidInput(
+                                "No IV in AAXC keys".to_string(),
+                            ));
                         };
                         (key, iv)
                     } else {
-                        return Err(crate::LibationError::InvalidInput("Unsupported key format (only AAXC supported)".to_string()));
+                        return Err(crate::LibationError::InvalidInput(
+                            "Unsupported key format (only AAXC supported)".to_string(),
+                        ));
                     }
                 } else {
-                    return Err(crate::LibationError::InvalidInput("No decryption keys in license".to_string()));
+                    return Err(crate::LibationError::InvalidInput(
+                        "No decryption keys in license".to_string(),
+                    ));
                 };
 
                 // Download encrypted file to cache directory
@@ -1884,31 +1972,46 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeDownlo
                 use futures_util::StreamExt;
                 use tokio::io::AsyncWriteExt;
 
-                let mut file = tokio::fs::File::create(&encrypted_path).await
-                    .map_err(|e| crate::LibationError::internal(format!("Failed to create file {}: {}", encrypted_path, e)))?;
+                let mut file = tokio::fs::File::create(&encrypted_path)
+                    .await
+                    .map_err(|e| {
+                        crate::LibationError::internal(format!(
+                            "Failed to create file {}: {}",
+                            encrypted_path, e
+                        ))
+                    })?;
 
                 let mut stream = response.bytes_stream();
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk
-                        .map_err(|e| crate::LibationError::NetworkError {
-                            message: format!("Stream error: {}", e),
-                            is_transient: true,
-                        })?;
-                    file.write_all(&chunk).await
-                        .map_err(|e| crate::LibationError::internal(format!("Write failed: {}", e)))?;
+                    let chunk = chunk.map_err(|e| crate::LibationError::NetworkError {
+                        message: format!("Stream error: {}", e),
+                        is_transient: true,
+                    })?;
+                    file.write_all(&chunk).await.map_err(|e| {
+                        crate::LibationError::internal(format!("Write failed: {}", e))
+                    })?;
                 }
-                file.flush().await
+                file.flush()
+                    .await
                     .map_err(|e| crate::LibationError::internal(format!("Flush failed: {}", e)))?;
 
                 // Return encrypted file path and decryption keys
                 // The TypeScript/Kotlin layer will use FFmpeg-Kit to decrypt
-                let file_metadata = tokio::fs::metadata(&encrypted_path).await
-                    .map_err(|e| crate::LibationError::not_found(format!("Downloaded file not found: {}", encrypted_path)))?;
+                let file_metadata = tokio::fs::metadata(&encrypted_path).await.map_err(|e| {
+                    crate::LibationError::not_found(format!(
+                        "Downloaded file not found: {}",
+                        encrypted_path
+                    ))
+                })?;
 
                 // Fetch book metadata from database if db_path provided
                 let book_metadata = if let Some(ref db_path) = params.db_path {
                     let db = crate::storage::Database::new(db_path).await?;
-                    crate::storage::queries::find_book_with_relations_by_asin(db.pool(), &params.asin).await?
+                    crate::storage::queries::find_book_with_relations_by_asin(
+                        db.pool(),
+                        &params.asin,
+                    )
+                    .await?
                 } else {
                     None
                 };
@@ -2053,7 +2156,9 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetDow
                 // For now, WorkManager backup handles token refresh
 
                 let account: crate::api::auth::Account = serde_json::from_str(&params.account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
+                    .map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
 
                 let quality = match params.quality.as_str() {
                     "Low" => crate::api::content::DownloadQuality::Low,
@@ -2064,32 +2169,46 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetDow
                 };
 
                 let client = crate::api::client::AudibleClient::new(account)?;
-                let license = client.build_download_license(&params.asin, quality, false).await?;
+                let license = client
+                    .build_download_license(&params.asin, quality, false)
+                    .await?;
 
                 // Extract AAXC keys
                 let (key_hex, iv_hex) = if let Some(ref keys) = license.decryption_keys {
                     if !keys.is_empty() && keys[0].key_part_1.len() == 16 {
-                        let key = keys[0].key_part_1.iter()
+                        let key = keys[0]
+                            .key_part_1
+                            .iter()
                             .map(|b| format!("{:02x}", b))
                             .collect::<String>();
                         let iv = if let Some(ref iv_bytes) = keys[0].key_part_2 {
-                            iv_bytes.iter()
+                            iv_bytes
+                                .iter()
                                 .map(|b| format!("{:02x}", b))
                                 .collect::<String>()
                         } else {
-                            return Err(crate::LibationError::InvalidInput("No IV in AAXC keys".to_string()));
+                            return Err(crate::LibationError::InvalidInput(
+                                "No IV in AAXC keys".to_string(),
+                            ));
                         };
                         (key, iv)
                     } else {
-                        return Err(crate::LibationError::InvalidInput("Unsupported key format (only AAXC supported)".to_string()));
+                        return Err(crate::LibationError::InvalidInput(
+                            "Unsupported key format (only AAXC supported)".to_string(),
+                        ));
                     }
                 } else {
-                    return Err(crate::LibationError::InvalidInput("No decryption keys in license".to_string()));
+                    return Err(crate::LibationError::InvalidInput(
+                        "No decryption keys in license".to_string(),
+                    ));
                 };
 
                 // Build request headers
                 let mut request_headers = std::collections::HashMap::new();
-                request_headers.insert("User-Agent".to_string(), "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string());
+                request_headers.insert(
+                    "User-Agent".to_string(),
+                    "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string(),
+                );
 
                 // Get file size from HTTP HEAD request
                 let http_client = reqwest::Client::new();
@@ -2198,15 +2317,17 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeEnqueu
             let task_id = RUNTIME.block_on(async {
                 let manager = get_or_create_manager(&params.db_path).await?;
 
-                manager.enqueue_download(
-                    params.asin,
-                    params.title,
-                    params.download_url,
-                    params.total_bytes,
-                    params.download_path,
-                    params.output_path,
-                    params.request_headers,
-                ).await
+                manager
+                    .enqueue_download(
+                        params.asin,
+                        params.title,
+                        params.download_url,
+                        params.total_bytes,
+                        params.download_path,
+                        params.output_path,
+                        params.request_headers,
+                    )
+                    .await
             })?;
 
             let response = serde_json::json!({
@@ -2504,7 +2625,8 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeCancel
 ///   "db_path": "/data/data/.../audible.db",
 ///   "task_id": "uuid-string",
 ///   "status": "decrypting",
-///   "error": null
+///   "error": null,
+///   "output_path": "content://..."
 /// }
 /// ```
 #[no_mangle]
@@ -2522,6 +2644,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeUpdate
             task_id: String,
             status: String,
             error: Option<String>,
+            output_path: Option<String>,
         }
 
         match (move || -> crate::Result<String> {
@@ -2533,11 +2656,14 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeUpdate
 
             RUNTIME.block_on(async {
                 let manager = get_or_create_manager(&params.db_path).await?;
-                manager.update_task_status_with_error(
-                    &params.task_id,
-                    status,
-                    params.error.as_deref(),
-                ).await
+                manager
+                    .update_task_status_with_details(
+                        &params.task_id,
+                        status,
+                        params.error.as_deref(),
+                        params.output_path.as_deref(),
+                    )
+                    .await
             })?;
 
             Ok(success_response(serde_json::json!({"success": true})))
@@ -2589,12 +2715,14 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeStoreC
 
             RUNTIME.block_on(async {
                 let manager = get_or_create_manager(&params.db_path).await?;
-                manager.store_conversion_keys(
-                    &params.task_id,
-                    &params.aaxc_key,
-                    &params.aaxc_iv,
-                    &params.output_directory,
-                ).await
+                manager
+                    .store_conversion_keys(
+                        &params.task_id,
+                        &params.aaxc_key,
+                        &params.aaxc_iv,
+                        &params.output_directory,
+                    )
+                    .await
             })?;
 
             Ok(success_response(serde_json::json!({"success": true})))
@@ -2655,13 +2783,16 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeSaveAc
 
                 // Extract account_id from JSON
                 let account: serde_json::Value = serde_json::from_str(&params.account_json)
-                    .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e)))?;
+                    .map_err(|e| {
+                        crate::LibationError::InvalidInput(format!("Invalid account JSON: {}", e))
+                    })?;
 
-                let account_id = account["account_id"]
-                    .as_str()
-                    .ok_or_else(|| crate::LibationError::InvalidInput("Missing account_id".to_string()))?;
+                let account_id = account["account_id"].as_str().ok_or_else(|| {
+                    crate::LibationError::InvalidInput("Missing account_id".to_string())
+                })?;
 
-                crate::storage::accounts::save_account(db.pool(), account_id, &params.account_json).await?;
+                crate::storage::accounts::save_account(db.pool(), account_id, &params.account_json)
+                    .await?;
 
                 Ok(success_response(serde_json::json!({"saved": true})))
             })
@@ -2734,6 +2865,60 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetPri
         .into_raw()
 }
 
+/// Delete account from database
+///
+/// # Arguments (JSON string)
+/// ```json
+/// {
+///   "db_path": "/data/data/.../audible.db",
+///   "account_id": "account-id"
+/// }
+/// ```
+///
+/// # Returns (JSON)
+/// ```json
+/// {
+///   "success": true,
+///   "data": { "deleted": true }
+/// }
+/// ```
+#[no_mangle]
+pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeDeleteAccount(
+    mut env: JNIEnv,
+    _class: JClass,
+    params_json: JString,
+) -> jstring {
+    let params_str_result = jstring_to_string(&mut env, params_json);
+
+    let response = catch_panic(move || {
+        #[derive(Deserialize)]
+        struct Params {
+            db_path: String,
+            account_id: String,
+        }
+
+        match (move || -> crate::Result<String> {
+            let params_str = params_str_result?;
+            let params: Params = serde_json::from_str(&params_str)
+                .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
+
+            RUNTIME.block_on(async {
+                let db = crate::storage::Database::new(&params.db_path).await?;
+                crate::storage::accounts::delete_account(db.pool(), &params.account_id).await?;
+
+                Ok(success_response(serde_json::json!({"deleted": true})))
+            })
+        })() {
+            Ok(result) => result,
+            Err(e) => error_response(&e.to_string()),
+        }
+    });
+
+    env.new_string(response)
+        .expect("Failed to create Java string")
+        .into_raw()
+}
+
 /// Clear download state for all books
 ///
 /// Resets download status but keeps all book metadata.
@@ -2773,8 +2958,11 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeClearD
 
             RUNTIME.block_on(async {
                 let db = crate::storage::Database::new(&params.db_path).await?;
-                let books_updated = crate::storage::queries::clear_download_state(db.pool()).await?;
-                Ok(success_response(serde_json::json!({"books_updated": books_updated})))
+                let books_updated =
+                    crate::storage::queries::clear_download_state(db.pool()).await?;
+                Ok(success_response(
+                    serde_json::json!({"books_updated": books_updated}),
+                ))
             })
         })() {
             Ok(result) => result,
@@ -2828,8 +3016,11 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
 
             RUNTIME.block_on(async {
                 let db = crate::storage::Database::new(&params.db_path).await?;
-                let file_path = crate::storage::queries::get_book_file_path(db.pool(), &params.asin).await?;
-                Ok(success_response(serde_json::json!({"file_path": file_path})))
+                let file_path =
+                    crate::storage::queries::get_book_file_path(db.pool(), &params.asin).await?;
+                Ok(success_response(
+                    serde_json::json!({"file_path": file_path}),
+                ))
             })
         })() {
             Ok(result) => result,
@@ -3063,7 +3254,8 @@ mod tests {
 
     #[test]
     fn test_result_to_json_error() {
-        let result: crate::Result<String> = Err(crate::LibationError::InvalidInput("test error".to_string()));
+        let result: crate::Result<String> =
+            Err(crate::LibationError::InvalidInput("test error".to_string()));
         let json = result_to_json(result);
         assert!(json.contains("\"success\":false"));
         assert!(json.contains("test error"));
