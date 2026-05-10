@@ -8,7 +8,6 @@ import {
   RustBridgeError,
 } from '../../modules/expo-rust-bridge';
 import type { Account, Locale } from '../../modules/expo-rust-bridge';
-import * as SecureStore from 'expo-secure-store';
 import { useStyles } from '../hooks/useStyles';
 import { useTheme } from '../styles/theme';
 import type { Theme } from '../hooks/useStyles';
@@ -61,8 +60,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       console.log('[LoginScreen] Starting OAuth flow for region:', region.name, '(' + region.code + ')');
 
       const flowData = initiateOAuth(region.code);
-      console.log('[LoginScreen] OAuth URL generated:', flowData.url);
-      console.log('[LoginScreen] Device serial:', flowData.deviceSerial);
+      console.log('[LoginScreen] OAuth URL generated');
 
       oauthDataRef.current = {
         pkceVerifier: flowData.pkceVerifier,
@@ -94,7 +92,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // Handle WebView navigation state changes
   const handleNavigationStateChange = async (navState: any) => {
     const { url } = navState;
-    console.log('[LoginScreen] WebView navigated to:', url);
+    console.log('[LoginScreen] WebView navigation event');
 
     // Log all maplanding URLs to debug OAuth flow
     if (url.includes('/ap/maplanding')) {
@@ -178,17 +176,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           },
         };
 
-	console.log('[LoginScreen] Skipping activation bytes during login');
-        
-	// Store account in secure storage
-        console.log('[LoginScreen] Storing account in secure storage...');
-        await SecureStore.setItemAsync('audible_account', JSON.stringify(account));
-
-        // Store token expiry if available
-        if (account.identity?.access_token?.expires_at) {
-          console.log('[LoginScreen] Storing token expiry:', account.identity.access_token.expires_at);
-          await SecureStore.setItemAsync('token_expires_at', account.identity.access_token.expires_at);
-        }
+        console.log('[LoginScreen] Skipping activation bytes during login');
 
         setStatus('Login successful!');
         console.log('[LoginScreen] Login complete! Calling onLoginSuccess');

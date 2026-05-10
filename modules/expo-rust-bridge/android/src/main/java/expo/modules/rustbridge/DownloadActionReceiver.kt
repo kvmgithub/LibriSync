@@ -6,7 +6,6 @@ import android.content.Intent
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
  * BroadcastReceiver for handling notification action buttons
@@ -32,7 +31,7 @@ class DownloadActionReceiver : BroadcastReceiver() {
             return
         }
 
-        val dbPath = File(context.cacheDir, "audible.db").absolutePath
+        val dbPath = AppPaths.databasePath(context)
 
         Log.d(TAG, "Received action: ${intent.action} for ASIN: $asin")
 

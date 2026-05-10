@@ -24,8 +24,9 @@ import {
   isBackgroundServiceRunning,
   type BackgroundTask,
 } from '../../modules/expo-rust-bridge';
-import { Directory, File, Paths } from 'expo-file-system';
+import { Directory, Paths } from 'expo-file-system';
 import Button from '../components/Button';
+import { getDatabasePath } from '../utils/appPaths';
 
 /**
  * Task Debug Screen
@@ -68,9 +69,7 @@ export default function TaskDebugScreen() {
 
   const checkAccount = async () => {
     try {
-      const cacheUri = Paths.cache.uri;
-      const cachePath = cacheUri.replace('file://', '');
-      const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+      const dbPath = getDatabasePath();
 
       initializeDatabase(dbPath);
       const account = await getPrimaryAccount(dbPath);
@@ -170,9 +169,7 @@ export default function TaskDebugScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const cacheUri = Paths.cache.uri;
-              const cachePath = cacheUri.replace('file://', '');
-              const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+              const dbPath = getDatabasePath();
 
               const booksUpdated = await clearDownloadState(dbPath);
               Alert.alert('Success', `Download state cleared for ${booksUpdated} books.`);
@@ -196,9 +193,7 @@ export default function TaskDebugScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const cacheUri = Paths.cache.uri;
-              const cachePath = cacheUri.replace('file://', '');
-              const dbPath = `${cachePath.replace(/\/$/, '')}/audible.db`;
+              const dbPath = getDatabasePath();
 
               // Clear download state first (before deleting books)
               const booksUpdated = await clearDownloadState(dbPath);
@@ -334,16 +329,16 @@ export default function TaskDebugScreen() {
     );
   };
 
-  const handleListCacheFiles = async () => {
+  const handleListAppFiles = async () => {
     try {
-      console.log('[TaskDebug] Listing cache directory recursively...');
-      console.log('[TaskDebug] Cache path:', Paths.cache.uri);
+      console.log('[TaskDebug] Listing app files directory recursively...');
+      console.log('[TaskDebug] App files path:', Paths.document.uri);
 
-      const cacheDir = new Directory(Paths.cache);
+      const appFilesDir = new Directory(Paths.document);
 
-      if (!cacheDir.exists) {
-        console.log('[TaskDebug] Cache directory does not exist');
-        Alert.alert('Cache Directory', 'Cache directory does not exist');
+      if (!appFilesDir.exists) {
+        console.log('[TaskDebug] App files directory does not exist');
+        Alert.alert('App Files', 'App files directory does not exist');
         return;
       }
 
@@ -360,7 +355,7 @@ export default function TaskDebugScreen() {
           const name = item.uri.split('/').filter(Boolean).pop() || 'unknown';
           const decodedName = decodeURIComponent(name);
 
-          // Skip system/cache folders
+          // Skip noisy system/cache folders if they appear in this listing.
           const skipFolders = ['WebView', 'http-cache', 'Crash Reports', 'image_cache'];
           if (skipFolders.includes(decodedName) && prefix === '') {
             continue;
@@ -401,7 +396,7 @@ export default function TaskDebugScreen() {
         }
       };
 
-      await listRecursive(cacheDir);
+      await listRecursive(appFilesDir);
 
       console.log('[TaskDebug] ================');
       console.log('[TaskDebug] Total:', fileCount, 'files,', dirCount, 'directories');
@@ -412,12 +407,12 @@ export default function TaskDebugScreen() {
       const more = fileDetails.length > 15 ? `\n... and ${fileDetails.length - 15} more` : '';
       const totalSizeMB = (totalSize / 1024 / 1024).toFixed(2);
       Alert.alert(
-        'Cache Directory',
+        'App Files',
         `${fileCount} files, ${dirCount} dirs\nTotal: ${totalSizeMB} MB\n\n${summary}${more}\n\nCheck console for full listing.`
       );
     } catch (error: any) {
-      console.error('[TaskDebug] Failed to list cache files:', error);
-      Alert.alert('Error', error.message || 'Failed to list cache directory');
+      console.error('[TaskDebug] Failed to list app files:', error);
+      Alert.alert('Error', error.message || 'Failed to list app files directory');
     }
   };
 
@@ -674,8 +669,8 @@ export default function TaskDebugScreen() {
           />
 
           <Button
-            title="List Cache Files"
-            onPress={handleListCacheFiles}
+            title="List App Files"
+            onPress={handleListAppFiles}
             variant="outlined"
             state="primary"
             style={{ marginBottom: spacing.sm }}
@@ -846,7 +841,7 @@ const createStyles = (theme: Theme) => ({
     marginBottom: theme.spacing.xs,
   },
   progressFill: {
-    height: '100%',
+    height: '100%' as const,
     borderRadius: 4,
   },
   progressText: {

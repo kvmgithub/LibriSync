@@ -519,6 +519,9 @@ class DownloadWorker(
             coverArtPath?.let { File(it).delete() }
 
             // Mark as completed
+            task.getMetadataString(DownloadTaskMetadata.RUST_TASK_ID)?.let { rustTaskId ->
+                updateRustTaskStatusInDb(rustTaskId, "completed", finalPath)
+            }
             task.status = TaskStatus.COMPLETED
             task.completedAt = java.util.Date()
             manager.emitEvent(TaskEvent.DownloadComplete(
@@ -839,6 +842,24 @@ class DownloadWorker(
 
     private fun getManuallyPausedAsins(): Set<String> {
         return prefs.getStringSet(PREF_MANUALLY_PAUSED, emptySet()) ?: emptySet()
+    }
+
+    /**
+     * Keep the persistent Rust download task in sync with the final converted file path.
+     */
+    private fun updateRustTaskStatusInDb(taskId: String, status: String, outputPath: String? = null) {
+        try {
+            val params = JSONObject().apply {
+                put("db_path", manager.getDbPath())
+                put("task_id", taskId)
+                put("status", status)
+                outputPath?.let { put("output_path", it) }
+            }
+            ExpoRustBridgeModule.nativeUpdateDownloadTaskStatus(params.toString())
+            Log.d(TAG, "Updated Rust task $taskId status to $status")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Rust task status: ${e.message}")
+        }
     }
 
     // ========================================================================

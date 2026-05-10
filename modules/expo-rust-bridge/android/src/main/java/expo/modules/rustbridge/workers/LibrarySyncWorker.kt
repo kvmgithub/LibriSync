@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import expo.modules.rustbridge.AppPaths
 import expo.modules.rustbridge.ExpoRustBridgeModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -68,7 +69,7 @@ class LibrarySyncWorker(
             Log.d(TAG, "Library sync worker started")
 
             // Get database path
-            val dbPath = applicationContext.cacheDir.absolutePath + "/audible.db"
+            val dbPath = AppPaths.databasePath(applicationContext)
 
             // Load account from SQLite database
             val getAccountParams = JSONObject().apply {

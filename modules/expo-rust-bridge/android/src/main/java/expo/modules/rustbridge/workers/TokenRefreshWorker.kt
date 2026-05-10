@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import expo.modules.rustbridge.AppPaths
 import expo.modules.rustbridge.ExpoRustBridgeModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -66,7 +67,7 @@ class TokenRefreshWorker(
             Log.d(TAG, "Token refresh worker started")
 
             // Get database path
-            val dbPath = applicationContext.cacheDir.absolutePath + "/audible.db"
+            val dbPath = AppPaths.databasePath(applicationContext)
 
             // Load account from SQLite database
             val getAccountParams = JSONObject().apply {
@@ -95,10 +96,6 @@ class TokenRefreshWorker(
 
             // Debug: Log identity structure
             Log.d(TAG, "Identity keys: ${identity.keys().asSequence().toList()}")
-
-            // Log current refresh token from database (for debugging)
-            val currentRefreshToken = identity.optString("refresh_token", "")
-            Log.d(TAG, "Loaded refresh_token from DB: ${if (currentRefreshToken.isEmpty()) "EMPTY/NULL" else currentRefreshToken.substring(0, minOf(20, currentRefreshToken.length)) + "..."}")
 
             // Get token expiry
             val accessTokenObj = identity.opt("access_token")
@@ -144,10 +141,6 @@ class TokenRefreshWorker(
             val refreshToken = identity.getString("refresh_token")
             val deviceSerial = identity.getString("device_serial_number")
 
-            // Log refresh token for debugging (first 20 chars only)
-            val tokenPreview = if (refreshToken.length > 20) refreshToken.substring(0, 20) + "..." else refreshToken
-            Log.d(TAG, "Using refresh_token: $tokenPreview")
-
             // Call Rust to refresh token
             Log.d(TAG, "Calling Rust to refresh token")
             val refreshParams = JSONObject().apply {
@@ -174,7 +167,7 @@ class TokenRefreshWorker(
             val newRefreshToken = if (dataObj.has("refresh_token") && !dataObj.isNull("refresh_token")) {
                 val token = dataObj.getString("refresh_token")
                 if (token.isNotEmpty()) {
-                    Log.d(TAG, "Amazon returned new refresh_token: ${token.substring(0, minOf(20, token.length))}...")
+                    Log.d(TAG, "Amazon returned new refresh_token")
                     token
                 } else {
                     Log.d(TAG, "Amazon returned empty refresh_token, keeping old one")

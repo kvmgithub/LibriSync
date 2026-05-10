@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! AAX file decryption (legacy Audible format)
 //!
 //! # Reference C# Sources
@@ -37,7 +36,7 @@
 //! 1. Use activation bytes as key
 //! 2. Call FFmpeg with `-activation_bytes` parameter
 //! 3. FFmpeg command (from Libation):
-//!    ```
+//!    ```text
 //!    ffmpeg -activation_bytes <BYTES> -i input.aax -vn -c:a copy output.m4b
 //!    ```
 //! 4. `-vn`: No video (strip cover art, will re-add later)
@@ -53,7 +52,7 @@
 //!   5. Write decrypted MP4
 //! - FFmpeg approach is simpler and battle-tested
 
-use crate::crypto::activation::{ActivationBytes, format_activation_bytes};
+use crate::crypto::activation::{format_activation_bytes, ActivationBytes};
 use crate::error::{LibationError, Result};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -195,9 +194,7 @@ async fn check_ffmpeg_available() -> Result<()> {
     {
         Ok(status) if status.success() => Ok(()),
         Ok(_) => Err(LibationError::FfmpegNotFound),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Err(LibationError::FfmpegNotFound)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(LibationError::FfmpegNotFound),
         Err(e) => Err(LibationError::FfmpegError(format!(
             "Failed to check FFmpeg availability: {}",
             e
@@ -217,11 +214,7 @@ async fn check_ffmpeg_available() -> Result<()> {
 ///
 /// # Returns
 /// Configured Command ready to execute
-fn build_ffmpeg_command(
-    input: &Path,
-    output: &Path,
-    activation_bytes: &str,
-) -> Result<Command> {
+fn build_ffmpeg_command(input: &Path, output: &Path, activation_bytes: &str) -> Result<Command> {
     let mut cmd = Command::new("ffmpeg");
 
     cmd
@@ -274,18 +267,21 @@ where
     })?;
 
     // Capture stderr for progress parsing
-    let stderr = child.stderr.take().ok_or_else(|| {
-        LibationError::FfmpegError("Failed to capture FFmpeg stderr".to_string())
-    })?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| LibationError::FfmpegError("Failed to capture FFmpeg stderr".to_string()))?;
 
     let mut reader = BufReader::new(stderr).lines();
     let mut error_output = String::new();
     let mut duration_seconds: Option<f32> = None;
 
     // Read FFmpeg output line by line
-    while let Some(line) = reader.next_line().await.map_err(|e| {
-        LibationError::FfmpegError(format!("Failed to read FFmpeg output: {}", e))
-    })? {
+    while let Some(line) = reader
+        .next_line()
+        .await
+        .map_err(|e| LibationError::FfmpegError(format!("Failed to read FFmpeg output: {}", e)))?
+    {
         // Accumulate error output for debugging
         error_output.push_str(&line);
         error_output.push('\n');
@@ -421,7 +417,10 @@ fn parse_timestamp(timestamp: &str) -> Option<f32> {
 /// 2. Running FFmpeg with -t 5 to decrypt only first 5 seconds
 /// 3. Checking if output is valid
 /// 4. Cleaning up temporary file
-pub async fn verify_activation_bytes(file: &Path, activation_bytes: &ActivationBytes) -> Result<bool> {
+pub async fn verify_activation_bytes(
+    file: &Path,
+    activation_bytes: &ActivationBytes,
+) -> Result<bool> {
     // Create temporary directory for test output
     let temp_dir = std::env::temp_dir();
     let temp_output = temp_dir.join(format!("aax_verify_{}.m4b", std::process::id()));
@@ -543,7 +542,8 @@ mod tests {
 
     #[test]
     fn test_parse_duration_from_line_no_duration() {
-        let line = "frame=  123 fps= 45 q=-1.0 size=   12345kB time=00:12:34.56 bitrate= 123.4kbits/s";
+        let line =
+            "frame=  123 fps= 45 q=-1.0 size=   12345kB time=00:12:34.56 bitrate= 123.4kbits/s";
         assert_eq!(parse_duration_from_line(line), None);
     }
 

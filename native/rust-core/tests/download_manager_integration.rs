@@ -16,10 +16,13 @@ const TEST_ASIN: &str = "B07NP9L44Y";
 
 /// Load account from test fixture
 fn load_test_account() -> Result<Account, Box<dyn std::error::Error>> {
-    use rust_core::api::auth::{Identity, Locale, AccessToken};
+    use rust_core::api::auth::{AccessToken, Identity, Locale};
     use rust_core::api::registration::RegistrationResponse;
 
-    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/test_fixtures/registration_response.json");
+    let fixture_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test_fixtures/registration_response.json"
+    );
     let fixture_data = std::fs::read_to_string(fixture_path)?;
     let reg_response: RegistrationResponse = serde_json::from_str(&fixture_data)?;
 
@@ -30,7 +33,8 @@ fn load_test_account() -> Result<Account, Box<dyn std::error::Error>> {
 
     let access_token = AccessToken {
         token: bearer.access_token.clone(),
-        expires_at: chrono::Utc::now() + chrono::Duration::seconds(bearer.expires_in.parse::<i64>().unwrap_or(3600)),
+        expires_at: chrono::Utc::now()
+            + chrono::Duration::seconds(bearer.expires_in.parse::<i64>().unwrap_or(3600)),
     };
 
     let identity = Identity::new(
@@ -69,11 +73,9 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
         let refresh_token = identity.refresh_token.clone();
         let device_serial = account.account_id.clone();
 
-        let new_tokens = rust_core::api::auth::refresh_access_token(
-            &locale,
-            &refresh_token,
-            &device_serial,
-        ).await?;
+        let new_tokens =
+            rust_core::api::auth::refresh_access_token(&locale, &refresh_token, &device_serial)
+                .await?;
 
         println!("   ✓ Token refreshed");
         println!("   - Expires in: {} seconds", new_tokens.expires_in);
@@ -93,13 +95,21 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
     // Create client and get download license
     println!("\n3. Getting download license for {}...", TEST_ASIN);
     let client = AudibleClient::new(account.clone())?;
-    let license = client.build_download_license(TEST_ASIN, DownloadQuality::High, false).await?;
+    let license = client
+        .build_download_license(TEST_ASIN, DownloadQuality::High, false)
+        .await?;
     println!("   ✓ License obtained");
-    println!("   - Download URL: {}", &license.download_url[..std::cmp::min(80, license.download_url.len())]);
+    println!(
+        "   - Download URL: {}",
+        &license.download_url[..std::cmp::min(80, license.download_url.len())]
+    );
 
     // Extract headers for download
     let mut request_headers = std::collections::HashMap::new();
-    request_headers.insert("User-Agent".to_string(), "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string());
+    request_headers.insert(
+        "User-Agent".to_string(),
+        "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string(),
+    );
 
     // Create temporary database
     println!("\n4. Setting up download manager...");
@@ -134,19 +144,25 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    println!("   ✓ File size: {} bytes ({:.2} MB)", total_bytes, total_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "   ✓ File size: {} bytes ({:.2} MB)",
+        total_bytes,
+        total_bytes as f64 / 1024.0 / 1024.0
+    );
 
     // Enqueue download
     println!("\n5. Setting up download manager...");
-    let task_id = manager.enqueue_download(
-        TEST_ASIN.to_string(),
-        "A Mind of Her Own".to_string(),
-        license.download_url.clone(),
-        total_bytes,
-        encrypted_path.to_str().unwrap().to_string(),
-        output_path.to_str().unwrap().to_string(),
-        request_headers,
-    ).await?;
+    let task_id = manager
+        .enqueue_download(
+            TEST_ASIN.to_string(),
+            "A Mind of Her Own".to_string(),
+            license.download_url.clone(),
+            total_bytes,
+            encrypted_path.to_str().unwrap().to_string(),
+            output_path.to_str().unwrap().to_string(),
+            request_headers,
+        )
+        .await?;
     println!("   ✓ Download enqueued: {}", task_id);
 
     // Monitor progress
@@ -161,7 +177,8 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
         let task = manager.get_task(&task_id).await?;
 
         // Print progress update every 2 seconds or on status change
-        if last_print.elapsed() >= Duration::from_secs(2) || task.status != TaskStatus::Downloading {
+        if last_print.elapsed() >= Duration::from_secs(2) || task.status != TaskStatus::Downloading
+        {
             let percentage = task.progress_percentage();
             let speed = if task.bytes_downloaded > last_progress {
                 let bytes_diff = task.bytes_downloaded - last_progress;
@@ -177,11 +194,7 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
 
             println!(
                 "   [{:?}] {:.1}% ({} / {} bytes) - {:.2} MB/s",
-                task.status,
-                percentage,
-                task.bytes_downloaded,
-                task.total_bytes,
-                speed
+                task.status, percentage, task.bytes_downloaded, task.total_bytes, speed
             );
 
             last_progress = task.bytes_downloaded;
@@ -214,7 +227,11 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
     println!("\n7. Verifying downloaded file...");
     let metadata = tokio::fs::metadata(&encrypted_path).await?;
     println!("   ✓ File exists: {:?}", encrypted_path);
-    println!("   ✓ File size: {} bytes ({:.2} MB)", metadata.len(), metadata.len() as f64 / 1024.0 / 1024.0);
+    println!(
+        "   ✓ File size: {} bytes ({:.2} MB)",
+        metadata.len(),
+        metadata.len() as f64 / 1024.0 / 1024.0
+    );
 
     // Verify file size matches expected
     if total_bytes > 0 {
@@ -222,9 +239,15 @@ async fn test_download_book_with_manager() -> Result<(), Box<dyn std::error::Err
         let size_diff_pct = (size_diff as f64 / total_bytes as f64) * 100.0;
 
         if size_diff_pct < 1.0 {
-            println!("   ✓ File size matches expected ({:.2}% difference)", size_diff_pct);
+            println!(
+                "   ✓ File size matches expected ({:.2}% difference)",
+                size_diff_pct
+            );
         } else {
-            println!("   ⚠ File size differs by {:.2}% from expected", size_diff_pct);
+            println!(
+                "   ⚠ File size differs by {:.2}% from expected",
+                size_diff_pct
+            );
         }
     }
 
@@ -244,7 +267,9 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
     // Get license
     println!("\n2. Getting download license...");
     let client = AudibleClient::new(account.clone())?;
-    let license = client.build_download_license(TEST_ASIN, DownloadQuality::High, false).await?;
+    let license = client
+        .build_download_license(TEST_ASIN, DownloadQuality::High, false)
+        .await?;
     println!("   ✓ License obtained");
 
     // Setup manager
@@ -260,7 +285,10 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
     let output_path = download_dir.join(format!("{}.m4b", TEST_ASIN));
 
     let mut request_headers = std::collections::HashMap::new();
-    request_headers.insert("User-Agent".to_string(), "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string());
+    request_headers.insert(
+        "User-Agent".to_string(),
+        "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0".to_string(),
+    );
 
     // Get file size from HTTP HEAD
     let http_client = reqwest::Client::new();
@@ -279,15 +307,17 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
 
     // Enqueue download
     println!("\n3. Starting download...");
-    let task_id = manager.enqueue_download(
-        TEST_ASIN.to_string(),
-        "Test Book".to_string(),
-        license.download_url.clone(),
-        total_bytes,
-        encrypted_path.to_str().unwrap().to_string(),
-        output_path.to_str().unwrap().to_string(),
-        request_headers,
-    ).await?;
+    let task_id = manager
+        .enqueue_download(
+            TEST_ASIN.to_string(),
+            "Test Book".to_string(),
+            license.download_url.clone(),
+            total_bytes,
+            encrypted_path.to_str().unwrap().to_string(),
+            output_path.to_str().unwrap().to_string(),
+            request_headers,
+        )
+        .await?;
     println!("   ✓ Download started: {}", task_id);
 
     // Wait for some progress (5 seconds)
@@ -295,7 +325,8 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     let task_before_pause = manager.get_task(&task_id).await?;
-    println!("   ✓ Progress: {:.1}% ({} bytes)",
+    println!(
+        "   ✓ Progress: {:.1}% ({} bytes)",
         task_before_pause.progress_percentage(),
         task_before_pause.bytes_downloaded
     );
@@ -307,7 +338,10 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
 
     let task_paused = manager.get_task(&task_id).await?;
     assert_eq!(task_paused.status, TaskStatus::Paused);
-    println!("   ✓ Download paused at {} bytes", task_paused.bytes_downloaded);
+    println!(
+        "   ✓ Download paused at {} bytes",
+        task_paused.bytes_downloaded
+    );
 
     // Resume download
     println!("\n6. Resuming download...");
@@ -318,7 +352,8 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
 
     let task_resumed = manager.get_task(&task_id).await?;
     println!("   ✓ Download resumed: {:?}", task_resumed.status);
-    println!("   ✓ Current progress: {:.1}% ({} bytes)",
+    println!(
+        "   ✓ Current progress: {:.1}% ({} bytes)",
         task_resumed.progress_percentage(),
         task_resumed.bytes_downloaded
     );
@@ -337,6 +372,7 @@ async fn test_pause_resume_download() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[tokio::test]
+#[ignore] // Requires public internet access; run explicitly with --ignored.
 async fn test_download_manager_with_public_url() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing PersistentDownloadManager with public file ===\n");
 
@@ -376,19 +412,25 @@ async fn test_download_manager_with_public_url() -> Result<(), Box<dyn std::erro
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    println!("   ✓ File size: {} bytes ({:.2} MB)", total_bytes, total_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "   ✓ File size: {} bytes ({:.2} MB)",
+        total_bytes,
+        total_bytes as f64 / 1024.0 / 1024.0
+    );
 
     // Enqueue download
     println!("\n3. Enqueueing download...");
-    let task_id = manager.enqueue_download(
-        "TEST001".to_string(),
-        "Test File".to_string(),
-        test_url.to_string(),
-        total_bytes,
-        download_path.to_str().unwrap().to_string(),
-        output_path.to_str().unwrap().to_string(),
-        headers,
-    ).await?;
+    let task_id = manager
+        .enqueue_download(
+            "TEST001".to_string(),
+            "Test File".to_string(),
+            test_url.to_string(),
+            total_bytes,
+            download_path.to_str().unwrap().to_string(),
+            output_path.to_str().unwrap().to_string(),
+            headers,
+        )
+        .await?;
     println!("   ✓ Download enqueued: {}", task_id);
 
     // Monitor progress
@@ -403,7 +445,8 @@ async fn test_download_manager_with_public_url() -> Result<(), Box<dyn std::erro
         let task = manager.get_task(&task_id).await?;
 
         // Print progress update
-        if last_print.elapsed() >= Duration::from_secs(1) || task.status != TaskStatus::Downloading {
+        if last_print.elapsed() >= Duration::from_secs(1) || task.status != TaskStatus::Downloading
+        {
             let percentage = task.progress_percentage();
             let speed = if task.bytes_downloaded > last_progress {
                 let bytes_diff = task.bytes_downloaded - last_progress;
@@ -419,11 +462,7 @@ async fn test_download_manager_with_public_url() -> Result<(), Box<dyn std::erro
 
             println!(
                 "   [{:?}] {:.1}% ({} / {} bytes) - {:.2} MB/s",
-                task.status,
-                percentage,
-                task.bytes_downloaded,
-                task.total_bytes,
-                speed
+                task.status, percentage, task.bytes_downloaded, task.total_bytes, speed
             );
 
             last_progress = task.bytes_downloaded;
@@ -456,7 +495,11 @@ async fn test_download_manager_with_public_url() -> Result<(), Box<dyn std::erro
     println!("\n5. Verifying downloaded file...");
     let metadata = tokio::fs::metadata(&download_path).await?;
     println!("   ✓ File exists: {:?}", download_path);
-    println!("   ✓ File size: {} bytes ({:.2} MB)", metadata.len(), metadata.len() as f64 / 1024.0 / 1024.0);
+    println!(
+        "   ✓ File size: {} bytes ({:.2} MB)",
+        metadata.len(),
+        metadata.len() as f64 / 1024.0 / 1024.0
+    );
 
     // Verify file size matches expected
     if total_bytes > 0 {
@@ -485,15 +528,17 @@ async fn test_list_downloads() -> Result<(), Box<dyn std::error::Error>> {
     headers.insert("User-Agent".to_string(), "Test".to_string());
 
     for i in 1..=5 {
-        let task_id = manager.enqueue_download(
-            format!("B00{}", i),
-            format!("Test Book {}", i),
-            format!("https://example.com/book{}.aax", i),
-            1000000 * i as u64,
-            format!("/tmp/book{}.aax", i),
-            format!("/tmp/book{}.m4b", i),
-            headers.clone(),
-        ).await?;
+        let task_id = manager
+            .enqueue_download(
+                format!("B00{}", i),
+                format!("Test Book {}", i),
+                format!("https://example.com/book{}.aax", i),
+                1000000 * i as u64,
+                format!("/tmp/book{}.aax", i),
+                format!("/tmp/book{}.m4b", i),
+                headers.clone(),
+            )
+            .await?;
         task_ids.push(task_id);
     }
     println!("   ✓ Enqueued 5 downloads");

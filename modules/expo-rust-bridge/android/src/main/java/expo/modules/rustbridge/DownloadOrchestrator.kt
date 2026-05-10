@@ -486,7 +486,7 @@ class DownloadOrchestrator(
             progressCallback?.invoke(asin, "copying", 0.0, 0, 0)
 
             // Copy to final destination
-            copyToFinalDestination(asin, title, decryptedCachePath, outputDirectory, coverArtPath)
+            val finalPath = copyToFinalDestination(asin, title, decryptedCachePath, outputDirectory, coverArtPath)
 
             // Cleanup encrypted file
             File(encryptedPath).delete()
@@ -494,8 +494,8 @@ class DownloadOrchestrator(
             // Cleanup cover art temp file
             coverArtPath?.let { File(it).delete() }
 
-            // Mark as completed in DB
-            resolvedTaskId?.let { updateTaskStatusInDb(it, "completed") }
+            // Mark as completed in DB with the final SAF/file path
+            resolvedTaskId?.let { updateTaskStatusInDb(it, "completed", finalPath) }
 
         } catch (e: Exception) {
             Log.e(TAG, "Conversion failed for $asin", e)
@@ -514,7 +514,7 @@ class DownloadOrchestrator(
         decryptedCachePath: String,
         outputDirectory: String,
         coverArtPath: String?
-    ) = withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
         val cachedFile = File(decryptedCachePath)
         var finalPath = decryptedCachePath
 
@@ -594,6 +594,8 @@ class DownloadOrchestrator(
         clearManuallyPaused(asin)
 
         completionCallback?.invoke(asin, title, finalPath)
+
+        finalPath
     }
 
     /**
@@ -1239,12 +1241,13 @@ class DownloadOrchestrator(
     /**
      * Update task status in the database via JNI
      */
-    private fun updateTaskStatusInDb(taskId: String, status: String) {
+    private fun updateTaskStatusInDb(taskId: String, status: String, outputPath: String? = null) {
         try {
             val params = JSONObject().apply {
                 put("db_path", dbPath)
                 put("task_id", taskId)
                 put("status", status)
+                outputPath?.let { put("output_path", it) }
             }
             ExpoRustBridgeModule.nativeUpdateDownloadTaskStatus(params.toString())
             Log.d(TAG, "Updated task $taskId status to $status in DB")

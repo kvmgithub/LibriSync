@@ -2,6 +2,7 @@ package expo.modules.rustbridge.tasks
 
 import android.content.Context
 import android.util.Log
+import expo.modules.rustbridge.AppPaths
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.PriorityQueue
@@ -352,8 +353,7 @@ class BackgroundTaskManager private constructor(
      * Get database path
      */
     fun getDbPath(): String {
-        val cacheDir = context.cacheDir
-        return "${cacheDir.absolutePath}/audible.db"
+        return AppPaths.databasePath(context)
     }
 
     /**

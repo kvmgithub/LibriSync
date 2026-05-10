@@ -1,0 +1,84 @@
+{
+  "request_id": "8e570a18-8232-4df0-a212-c0d21860fcd5",
+  "response": {
+    "success": {
+      "customer_id": "amzn1.account.AGMGLSGIFYVALF2MEO4F3JJQRLSA",
+      "tokens": {
+        "bearer": {
+          "access_token": "Atna|synthetic-access-token-not-valid-for-api-use-000000000000000000000000000000000000000000000000000000000000",
+          "refresh_token": "Atnr|synthetic-refresh-token-not-valid-for-api-use-000000000000000000000000000000000000000000000000000000000000",
+          "expires_in": "3600"
+        },
+        "mac_dms": {
+          "device_private_key": "MIIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "adp_token": "{enc:synthetic-encrypted-payload}{key:synthetic-key}{iv:synthetic-iv}{name:Henning's 7th Android}{serial:B45EF975C33A7B7E8DAF4D96E39B8040}"
+        },
+        "website_cookies": [
+          {
+            "Name": "session-id",
+            "Value": "139-0923163-3019105",
+            "Domain": ".amazon.com",
+            "Path": "/",
+            "Expires": "2 Oct 2045 16:26:51 GMT",
+            "Secure": "true",
+            "HttpOnly": "false"
+          },
+          {
+            "Name": "ubid-main",
+            "Value": "synthetic-ubid-main",
+            "Domain": ".amazon.com",
+            "Path": "/",
+            "Expires": "2 Oct 2045 16:26:51 GMT",
+            "Secure": "true",
+            "HttpOnly": "false"
+          },
+          {
+            "Name": "x-main",
+            "Value": "synthetic-x-main",
+            "Domain": ".amazon.com",
+            "Path": "/",
+            "Expires": "7 Oct 2026 16:26:51 GMT",
+            "Secure": "true",
+            "HttpOnly": "true"
+          },
+          {
+            "Name": "at-main",
+            "Value": "\"Atza|synthetic-cookie-not-valid-for-api-use-000000000000000000000000000000000000000000\"",
+            "Domain": ".amazon.com",
+            "Path": "/",
+            "Expires": "7 Oct 2026 16:26:51 GMT",
+            "Secure": "true",
+            "HttpOnly": "true"
+          },
+          {
+            "Name": "sess-at-main",
+            "Value": "\"synthetic-session-cookie-not-valid-for-api-use\"",
+            "Domain": ".amazon.com",
+            "Path": "/",
+            "Expires": "7 Oct 2026 16:26:51 GMT",
+            "Secure": "true",
+            "HttpOnly": "true"
+          }
+        ],
+        "store_authentication_cookie": {
+          "cookie": "synthetic-store-auth-cookie-not-valid-for-api-use-000000000000000000000000000000000000000000"
+        },
+        "website_cookies_ttl": 31536000
+      },
+      "extensions": {
+        "device_info": {
+          "device_name": "Henning's 7th Android",
+          "device_serial_number": "B45EF975C33A7B7E8DAF4D96E39B8040",
+          "device_type": "A10KISP2GWF0E4"
+        },
+        "customer_info": {
+          "account_pool": "Amazon",
+          "user_id": "amzn1.account.AGMGLSGIFYVALF2MEO4F3JJQRLSA",
+          "home_region": "NA",
+          "name": "Henning Berge",
+          "given_name": "Henning"
+        }
+      }
+    }
+  }
+}

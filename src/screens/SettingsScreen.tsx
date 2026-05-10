@@ -6,7 +6,7 @@ import Constants from 'expo-constants';
 import { useStyles } from '../hooks/useStyles';
 import { useTheme } from '../styles/theme';
 import type { Theme } from '../hooks/useStyles';
-import { Directory, File, Paths } from 'expo-file-system';
+import { Directory, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import {
   scheduleTokenRefresh,
@@ -15,6 +15,7 @@ import {
   cancelLibrarySync,
   ExpoRustBridge,
 } from '../../modules/expo-rust-bridge';
+import { getDatabaseFiles } from '../utils/appPaths';
 
 const DOWNLOAD_PATH_KEY = 'download_path';
 const NAMING_PATTERN_KEY = 'naming_pattern';
@@ -346,28 +347,12 @@ export default function SettingsScreen() {
             try {
               console.log('[Settings] Deleting database files...');
 
-              // Delete main database file
-              const dbFile = new File(Paths.cache, 'audible.db');
-              console.log('[Settings] Database exists:', dbFile.exists);
-              if (dbFile.exists) {
-                await dbFile.delete();
-                console.log('[Settings] Deleted audible.db');
-              }
-
-              // Delete WAL file
-              const walFile = new File(Paths.cache, 'audible.db-wal');
-              console.log('[Settings] WAL exists:', walFile.exists);
-              if (walFile.exists) {
-                await walFile.delete();
-                console.log('[Settings] Deleted audible.db-wal');
-              }
-
-              // Delete SHM file
-              const shmFile = new File(Paths.cache, 'audible.db-shm');
-              console.log('[Settings] SHM exists:', shmFile.exists);
-              if (shmFile.exists) {
-                await shmFile.delete();
-                console.log('[Settings] Deleted audible.db-shm');
+              for (const dbFile of getDatabaseFiles()) {
+                console.log('[Settings] Database file exists:', dbFile.name, dbFile.exists);
+                if (dbFile.exists) {
+                  await dbFile.delete();
+                  console.log('[Settings] Deleted database file:', dbFile.name);
+                }
               }
 
               Alert.alert(

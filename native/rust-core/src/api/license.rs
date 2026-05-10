@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! License and download voucher management
 //!
 //! # Reference C# Sources
@@ -86,13 +85,11 @@
 //!
 //! Reference: DownloadOptions.Factory.cs:100 - api.WidevineDrmLicense()
 
-use crate::error::{LibationError, Result};
 use crate::api::client::AudibleClient;
-use crate::api::content::{
-    DrmType, Codec, DownloadQuality, ChapterTitlesType, ContentMetadata
-};
-use serde::{Deserialize, Serialize};
+use crate::api::content::{ChapterTitlesType, Codec, ContentMetadata, DownloadQuality, DrmType};
+use crate::error::{LibationError, Result};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // LICENSE REQUEST STRUCTURES
@@ -132,7 +129,10 @@ pub struct LicenseRequest {
 
     /// Chapter titles type (Flat or Tree)
     /// Reference: DownloadOptions.Factory.cs:80 - ChapterTitlesType.Tree
-    #[serde(rename = "chapter_titles_type", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chapter_titles_type",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chapter_titles_type: Option<ChapterTitlesType>,
 
     /// Request spatial audio if available
@@ -292,8 +292,10 @@ impl KeyData {
             .map_err(|e| LibationError::InvalidInput(format!("Invalid hex key: {}", e)))?;
 
         let iv_bytes = if let Some(iv_str) = iv_hex {
-            Some(hex::decode(iv_str)
-                .map_err(|e| LibationError::InvalidInput(format!("Invalid hex IV: {}", e)))?)
+            Some(
+                hex::decode(iv_str)
+                    .map_err(|e| LibationError::InvalidInput(format!("Invalid hex IV: {}", e)))?,
+            )
         } else {
             None
         };
@@ -313,19 +315,20 @@ impl KeyData {
     ///     => voucher is null ? null : [new KeyData(voucher.Key, voucher.Iv)];
     /// ```
     pub fn from_base64(key: &str, iv: Option<&str>) -> Result<Self> {
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
 
         let key_bytes = general_purpose::STANDARD
             .decode(key)
             .map_err(|e| LibationError::InvalidInput(format!("Invalid base64 key: {}", e)))?;
 
-        let iv_bytes = if let Some(iv_str) = iv {
-            Some(general_purpose::STANDARD
-                .decode(iv_str)
-                .map_err(|e| LibationError::InvalidInput(format!("Invalid base64 IV: {}", e)))?)
-        } else {
-            None
-        };
+        let iv_bytes =
+            if let Some(iv_str) = iv {
+                Some(general_purpose::STANDARD.decode(iv_str).map_err(|e| {
+                    LibationError::InvalidInput(format!("Invalid base64 IV: {}", e))
+                })?)
+            } else {
+                None
+            };
 
         Ok(Self {
             key_part_1: key_bytes,
@@ -364,18 +367,21 @@ impl KeyData {
         account_id: &str,
         asin: &str,
     ) -> Result<Self> {
-        use base64::{Engine as _, engine::general_purpose};
-        use sha2::{Sha256, Digest};
         use aes::Aes128;
-        use cbc::{Decryptor, cipher::{BlockDecryptMut, KeyIvInit}};
+        use base64::{engine::general_purpose, Engine as _};
+        use cbc::{
+            cipher::{BlockDecryptMut, KeyIvInit},
+            Decryptor,
+        };
+        use sha2::{Digest, Sha256};
 
         // Decode base64 ciphertext
         // Reference: ContentLicenseDtoV10.cs:38
         let ciphertext = general_purpose::STANDARD
             .decode(license_response_b64)
-            .map_err(|e| LibationError::InvalidInput(
-                format!("Invalid base64 license_response: {}", e)
-            ))?;
+            .map_err(|e| {
+                LibationError::InvalidInput(format!("Invalid base64 license_response: {}", e))
+            })?;
 
         // Derive key and IV from SHA256 hash
         // Reference: ContentLicenseDtoV10.cs:24-36
@@ -391,44 +397,44 @@ impl KeyData {
         // Reference: ContentLicenseDtoV10.cs:40-43 - uses Aes.Create() with 16-byte key
         type Aes128CbcDec = Decryptor<Aes128>;
 
-        let cipher = Aes128CbcDec::new_from_slices(&key, &iv)
-            .map_err(|e| LibationError::InvalidInput(
-                format!("Failed to create cipher: {:?}", e)
-            ))?;
+        let cipher = Aes128CbcDec::new_from_slices(&key, &iv).map_err(|e| {
+            LibationError::InvalidInput(format!("Failed to create cipher: {:?}", e))
+        })?;
 
         // Decrypt in place
         let mut buffer = ciphertext.clone();
         let plaintext = cipher
             .decrypt_padded_mut::<cbc::cipher::block_padding::NoPadding>(&mut buffer)
-            .map_err(|e| LibationError::InvalidInput(
-                format!("Failed to decrypt license_response: {:?}", e)
-            ))?;
+            .map_err(|e| {
+                LibationError::InvalidInput(format!("Failed to decrypt license_response: {:?}", e))
+            })?;
 
         // Remove null bytes and parse as ASCII
         // Reference: ContentLicenseDtoV10.cs:44
-        let plaintext_no_nulls: Vec<u8> = plaintext.iter()
-            .copied()
-            .take_while(|&b| b != 0)
-            .collect();
+        let plaintext_no_nulls: Vec<u8> =
+            plaintext.iter().copied().take_while(|&b| b != 0).collect();
 
-        let json_str = String::from_utf8(plaintext_no_nulls)
-            .map_err(|e| LibationError::InvalidInput(
-                format!("Decrypted license is not valid UTF-8: {}", e)
-            ))?;
+        let json_str = String::from_utf8(plaintext_no_nulls).map_err(|e| {
+            LibationError::InvalidInput(format!("Decrypted license is not valid UTF-8: {}", e))
+        })?;
 
         // Debug: print decrypted JSON
         eprintln!("🔍 DEBUG: Decrypted voucher JSON:\n{}\n", json_str);
 
         // Parse JSON to get Voucher
         // Reference: ContentLicenseDtoV10.cs:46 - VoucherDtoV10.FromJson(plainText)
-        let voucher: Voucher = serde_json::from_str(&json_str)
-            .map_err(|e| LibationError::InvalidInput(
-                format!("Failed to parse decrypted voucher JSON: {}\nJSON was: {}", e, json_str)
-            ))?;
+        let voucher: Voucher = serde_json::from_str(&json_str).map_err(|e| {
+            LibationError::InvalidInput(format!(
+                "Failed to parse decrypted voucher JSON: {}\nJSON was: {}",
+                e, json_str
+            ))
+        })?;
 
-        eprintln!("🔍 DEBUG: Voucher key length: {}, iv length: {:?}",
+        eprintln!(
+            "🔍 DEBUG: Voucher key length: {}, iv length: {:?}",
             voucher.key.len(),
-            voucher.iv.as_ref().map(|s| s.len()));
+            voucher.iv.as_ref().map(|s| s.len())
+        );
 
         // Convert voucher to KeyData
         // Check if key is hex (32 chars) or base64 (24 chars)
@@ -526,7 +532,8 @@ impl AudibleClient {
     /// # use rust_core::api::auth::Account;
     /// # use rust_core::api::license::LicenseRequest;
     /// # async fn example() -> rust_core::error::Result<()> {
-    /// let client = AudibleClient::new(Account::default())?;
+    /// let account = Account::new("user@example.com".to_string())?;
+    /// let client = AudibleClient::new(account)?;
     /// let request = LicenseRequest::default();
     /// let license = client.get_download_license("B002V5D7B0", &request).await?;
     /// println!("DRM type: {:?}", license.drm_type);
@@ -544,15 +551,14 @@ impl AudibleClient {
 
         // Parse license response
         // The API may wrap in "content_license" or return directly
-        let license_json = response
-            .get("content_license")
-            .unwrap_or(&response);
+        let license_json = response.get("content_license").unwrap_or(&response);
 
-        serde_json::from_value(license_json.clone())
-            .map_err(|e| LibationError::InvalidApiResponse {
+        serde_json::from_value(license_json.clone()).map_err(|e| {
+            LibationError::InvalidApiResponse {
                 message: format!("Failed to parse content license: {}", e),
                 response_body: Some(license_json.to_string()),
-            })
+            }
+        })
     }
 
     /// Build download license with decryption keys
@@ -599,7 +605,7 @@ impl AudibleClient {
             drm_type: Some(if prefer_widevine {
                 DrmType::Widevine
             } else {
-                DrmType::Adrm  // Default to Audible DRM (AAX/AAXC)
+                DrmType::Adrm // Default to Audible DRM (AAX/AAXC)
             }),
         };
 
@@ -619,10 +625,7 @@ impl AudibleClient {
         // Reference: DownloadOptions.Factory.cs:46-54 - DecryptionKeys = ToKeys(license.Voucher)
         let decryption_keys = if let Some(ref voucher) = license.voucher {
             // Structured voucher with key/iv fields (already decrypted)
-            let key_data = KeyData::from_base64(
-                &voucher.key,
-                voucher.iv.as_deref(),
-            )?;
+            let key_data = KeyData::from_base64(&voucher.key, voucher.iv.as_deref())?;
             Some(vec![key_data])
         } else if let Some(ref license_response) = license.license_response {
             // For AAXC files, the license_response is AES-encrypted
@@ -630,10 +633,11 @@ impl AudibleClient {
             // Reference: ContentLicenseDtoV10.cs:13-14, 19-47
             let account_lock = self.account();
             let account = account_lock.lock().await;
-            let identity = account.identity.as_ref()
-                .ok_or_else(|| LibationError::InvalidState(
-                    "No identity in account - cannot decrypt license_response".to_string()
-                ))?;
+            let identity = account.identity.as_ref().ok_or_else(|| {
+                LibationError::InvalidState(
+                    "No identity in account - cannot decrypt license_response".to_string(),
+                )
+            })?;
 
             let key_data = KeyData::from_license_response(
                 license_response,
@@ -732,7 +736,10 @@ impl AudibleClient {
     ///
     /// # Returns
     /// Output format (M4b or Mp3)
-    pub fn determine_output_format(license: &DownloadLicense, convert_to_mp3: bool) -> OutputFormat {
+    pub fn determine_output_format(
+        license: &DownloadLicense,
+        convert_to_mp3: bool,
+    ) -> OutputFormat {
         // Unencrypted content is always MP3
         if !license.drm_type.is_encrypted() {
             return OutputFormat::Mp3;
@@ -824,7 +831,7 @@ impl AudibleClient {
         _challenge: &[u8],
     ) -> Result<Vec<u8>> {
         Err(LibationError::not_implemented(
-            "Widevine license exchange requires CDM integration (see license.rs TODO)"
+            "Widevine license exchange requires CDM integration (see license.rs TODO)",
         ))
     }
 }
@@ -850,7 +857,7 @@ mod tests {
     #[test]
     fn test_key_data_file_type_aaxc() {
         let key_data = KeyData {
-            key_part_1: vec![0; 16], // 16 bytes
+            key_part_1: vec![0; 16],       // 16 bytes
             key_part_2: Some(vec![0; 16]), // 16 bytes
         };
 
@@ -869,7 +876,7 @@ mod tests {
 
     #[test]
     fn test_key_data_from_base64() {
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
 
         let key = general_purpose::STANDARD.encode(b"testkey1234567890");
         let iv = general_purpose::STANDARD.encode(b"testiv1234567890");
@@ -915,9 +922,9 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run with --ignored flag since it requires real API credentials
     async fn test_download_book_b07t2f8vjm() {
-        use crate::api::registration::RegistrationResponse;
-        use crate::api::client::AudibleClient;
         use crate::api::auth::Account;
+        use crate::api::client::AudibleClient;
+        use crate::api::registration::RegistrationResponse;
 
         println!("\n=== Download Book B07T2F8VJM Integration Test ===\n");
 
@@ -929,12 +936,13 @@ mod tests {
             .expect("Failed to parse registration response fixture");
 
         let locale = crate::api::auth::Locale::us();
-        let identity = reg_response.to_identity(locale)
+        let identity = reg_response
+            .to_identity(locale)
             .expect("Failed to convert registration to identity");
 
         // Create account with identity
-        let mut account = Account::new(identity.customer_info.user_id.clone())
-            .expect("Failed to create account");
+        let mut account =
+            Account::new(identity.customer_info.user_id.clone()).expect("Failed to create account");
         account.set_account_name(identity.customer_info.name.clone());
         account.set_identity(identity);
 
@@ -942,8 +950,7 @@ mod tests {
 
         // Step 2: Create API client
         println!("\n🔧 Creating Audible API client...");
-        let client = AudibleClient::new(account)
-            .expect("Failed to create API client");
+        let client = AudibleClient::new(account).expect("Failed to create API client");
         println!("✅ Client created");
 
         // Step 3: Request download license for B07T2F8VJM
@@ -951,11 +958,13 @@ mod tests {
         println!("\n📥 Requesting download license for ASIN: {}", TEST_ASIN);
         println!("   Quality: High");
 
-        let license_result = client.build_download_license(
-            TEST_ASIN,
-            DownloadQuality::High,
-            false // Don't prefer Widevine (use AAX/AAXC)
-        ).await;
+        let license_result = client
+            .build_download_license(
+                TEST_ASIN,
+                DownloadQuality::High,
+                false, // Don't prefer Widevine (use AAX/AAXC)
+            )
+            .await;
 
         let license = match license_result {
             Ok(lic) => {
@@ -971,7 +980,8 @@ mod tests {
         // Step 4: Display license information
         println!("\n📋 License Information:");
         println!("   DRM Type: {:?}", license.drm_type);
-        println!("   Content URL: {}",
+        println!(
+            "   Content URL: {}",
             if license.download_url.len() > 100 {
                 format!("{}...", &license.download_url[..100])
             } else {
@@ -990,13 +1000,17 @@ mod tests {
                 // Display activation bytes/keys as hex
                 if keys[0].key_part_1.len() == 4 {
                     // AAX: 4-byte activation bytes
-                    let hex_bytes = keys[0].key_part_1.iter()
+                    let hex_bytes = keys[0]
+                        .key_part_1
+                        .iter()
                         .map(|b| format!("{:02x}", b))
                         .collect::<String>();
                     println!("   Activation Bytes (AAX): {}", hex_bytes);
                 } else if keys[0].key_part_1.len() == 16 {
                     // AAXC: 16-byte key
-                    let hex_key = keys[0].key_part_1.iter()
+                    let hex_key = keys[0]
+                        .key_part_1
+                        .iter()
                         .map(|b| format!("{:02x}", b))
                         .collect::<String>();
                     println!("   Key (AAXC): {}", hex_key);
@@ -1005,7 +1019,8 @@ mod tests {
                 if let Some(ref key2) = keys[0].key_part_2 {
                     println!("   Key 2 Length: {} bytes", key2.len());
                     if key2.len() == 16 {
-                        let hex_iv = key2.iter()
+                        let hex_iv = key2
+                            .iter()
                             .map(|b| format!("{:02x}", b))
                             .collect::<String>();
                         println!("   IV (AAXC): {}", hex_iv);
@@ -1038,7 +1053,8 @@ mod tests {
             if !chapter_info.chapters.is_empty() {
                 println!("\n   First Chapters:");
                 for (i, chapter) in chapter_info.chapters.iter().take(3).enumerate() {
-                    println!("     {}. {} ({}ms - {}ms)",
+                    println!(
+                        "     {}. {} ({}ms - {}ms)",
                         i + 1,
                         chapter.title,
                         chapter.start_offset_ms,
@@ -1046,7 +1062,10 @@ mod tests {
                     );
                 }
                 if chapter_info.chapters.len() > 3 {
-                    println!("     ... and {} more chapters", chapter_info.chapters.len() - 3);
+                    println!(
+                        "     ... and {} more chapters",
+                        chapter_info.chapters.len() - 3
+                    );
                 }
             }
         } else {
@@ -1127,7 +1146,9 @@ mod tests {
         // Save activation bytes hex if available
         if let Some(ref keys) = license.decryption_keys {
             if !keys.is_empty() && keys[0].key_part_1.len() == 4 {
-                let hex = keys[0].key_part_1.iter()
+                let hex = keys[0]
+                    .key_part_1
+                    .iter()
                     .map(|b| format!("{:02x}", b))
                     .collect::<String>();
                 license_json["activation_bytes_hex"] = serde_json::json!(hex);
