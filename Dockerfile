@@ -101,9 +101,11 @@ RUN if [ -n "$GIT_REPO" ]; then \
 # Install Node.js dependencies
 RUN npm ci
 
-# Set APP_VERSION as environment variable (will be read by app.config.js)
+# Set APP_VERSION and GITHUB_RELEASE as environment variables (read by app.config.js)
 ARG APP_VERSION
+ARG GITHUB_RELEASE=""
 ENV APP_VERSION=${APP_VERSION}
+ENV GITHUB_RELEASE=${GITHUB_RELEASE}
 
 # Save FFmpeg-Kit AAR before Expo prebuild wipes it
 RUN if [ -f android/app/libs/ffmpeg-kit.aar ]; then \

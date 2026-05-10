@@ -16,6 +16,7 @@ import {
   ExpoRustBridge,
 } from '../../modules/expo-rust-bridge';
 import { getDatabaseFiles } from '../utils/appPaths';
+import { checkForUpdate, isGithubReleaseBuild, type UpdateInfo } from '../utils/versionCheck';
 
 const DOWNLOAD_PATH_KEY = 'download_path';
 const NAMING_PATTERN_KEY = 'naming_pattern';
@@ -45,9 +46,20 @@ export default function SettingsScreen() {
   const tapTimestamps = useRef<number[]>([]);
   const [tapCount, setTapCount] = useState(0);
 
+  // Update check
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
   // Load saved settings on mount
   useEffect(() => {
     loadSettings();
+  }, []);
+
+  // Check for updates on GitHub release builds
+  useEffect(() => {
+    if (!isGithubReleaseBuild()) return;
+    checkForUpdate().then(info => {
+      if (info?.isUpdateAvailable) setUpdateInfo(info);
+    });
   }, []);
 
   const loadSettings = async () => {
@@ -515,14 +527,24 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>About</Text>
 
           <TouchableOpacity
-            style={styles.card}
-            onPress={handleVersionTap}
+            style={[styles.card, updateInfo && styles.updateCard]}
+            onPress={updateInfo ? () => Linking.openURL(updateInfo.downloadUrl) : handleVersionTap}
             activeOpacity={0.7}
           >
             <Text style={styles.cardLabel}>Version</Text>
             <Text style={styles.cardValue}>
               {Constants.expoConfig?.version || '0.0.1'}
             </Text>
+            {updateInfo && (
+              <>
+                <Text style={styles.updateText}>
+                  Update available: v{updateInfo.latestVersion}
+                </Text>
+                <Text style={styles.updateLink}>
+                  Tap to download
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={styles.card}>
@@ -641,6 +663,20 @@ const createStyles = (theme: Theme) => ({
   },
   linkText: {
     color: theme.colors.accent,
+  },
+  updateCard: {
+    borderColor: theme.colors.success,
+  },
+  updateText: {
+    ...theme.typography.caption,
+    color: theme.colors.success,
+    fontWeight: '600' as const,
+    marginTop: theme.spacing.xs,
+  },
+  updateLink: {
+    ...theme.typography.caption,
+    color: theme.colors.accent,
+    marginTop: 2,
   },
   dangerButton: {
     backgroundColor: theme.colors.backgroundSecondary,

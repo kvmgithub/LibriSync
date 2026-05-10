@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { Alert, Linking } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { useTheme } from '../styles/theme';
+import { checkForUpdate, isGithubReleaseBuild } from '../utils/versionCheck';
 
 import LibraryScreen from '../screens/LibraryScreen';
 import SimpleAccountScreen from '../screens/SimpleAccountScreen';
@@ -25,18 +27,39 @@ export default function AppNavigator() {
     const checkDebugMode = async () => {
       try {
         const debugEnabled = await SecureStore.getItemAsync(DEBUG_MODE_KEY);
-        // If user has explicitly set debug mode via secret gesture, respect that setting
         if (debugEnabled === 'true') {
           setEnableDebugScreen(true);
         } else if (debugEnabled === 'false') {
           setEnableDebugScreen(false);
         }
-        // Otherwise, fall back to env var / __DEV__ (initial state)
       } catch (error) {
         console.error('[AppNavigator] Failed to check debug mode:', error);
       }
     };
     checkDebugMode();
+  }, []);
+
+  // Check for app updates on GitHub release builds
+  useEffect(() => {
+    if (!isGithubReleaseBuild()) return;
+
+    const checkUpdate = async () => {
+      const update = await checkForUpdate();
+      if (update?.isUpdateAvailable) {
+        Alert.alert(
+          'Update Available',
+          `A new version of LibriSync is available.\n\nCurrent: v${update.currentVersion}\nLatest: v${update.latestVersion}`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Download',
+              onPress: () => Linking.openURL(update.downloadUrl),
+            },
+          ],
+        );
+      }
+    };
+    checkUpdate();
   }, []);
 
   return (

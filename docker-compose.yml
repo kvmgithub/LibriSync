@@ -9,6 +9,7 @@ services:
         - GIT_BRANCH=${GIT_BRANCH:-main}
         - BUILD_TYPE=${BUILD_TYPE:-debug}
         - APP_VERSION=${APP_VERSION:-}
+        - GITHUB_RELEASE=${GITHUB_RELEASE:-}
         - KEYSTORE_FILE=${KEYSTORE_FILE:-}
         - KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-}
         - KEY_ALIAS=${KEY_ALIAS:-}
