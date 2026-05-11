@@ -8,6 +8,7 @@ services:
         - GIT_REPO=${GIT_REPO:-}
         - GIT_BRANCH=${GIT_BRANCH:-main}
         - BUILD_TYPE=${BUILD_TYPE:-debug}
+        - BUNDLE_TYPE=${BUNDLE_TYPE:-apk}
         - APP_VERSION=${APP_VERSION:-}
         - GITHUB_RELEASE=${GITHUB_RELEASE:-}
         - KEYSTORE_FILE=${KEYSTORE_FILE:-}

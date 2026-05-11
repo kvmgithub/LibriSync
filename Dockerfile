@@ -151,8 +151,12 @@ RUN if [ "$BUILD_TYPE" = "release" ] && [ -n "$KEYSTORE_FILE" ]; then \
         echo "✓ Signing configuration created"; \
     fi
 
-# Build Android APK (debug or release based on BUILD_TYPE)
-RUN if [ "$BUILD_TYPE" = "release" ]; then \
+# Build Android APK or AAB based on BUILD_TYPE and BUNDLE_TYPE
+ARG BUNDLE_TYPE=apk
+RUN if [ "$BUILD_TYPE" = "release" ] && [ "$BUNDLE_TYPE" = "aab" ]; then \
+        echo "Building release AAB..."; \
+        cd android && ./gradlew bundleRelease; \
+    elif [ "$BUILD_TYPE" = "release" ]; then \
         echo "Building release APK..."; \
         cd android && ./gradlew assembleRelease; \
     else \
@@ -170,12 +174,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy build artifacts from builder
-COPY --from=builder /app/android/app/build/outputs/apk /app/build/apk
+# Copy build artifacts from builder (APK and/or AAB)
+COPY --from=builder /app/android/app/build/outputs/ /app/build/outputs/
 COPY --from=builder /app/package.json /app/
 
 # Create a volume for output
 VOLUME /output
 
-# Command to copy APK to output directory
-CMD ["sh", "-c", "cp -r /app/build/apk/* /output/ && echo 'Build artifacts copied to /output/'"]
+# Command to copy build artifacts to output directory
+CMD ["sh", "-c", "mkdir -p /output && find /app/build/outputs -name '*.apk' -o -name '*.aab' | while read f; do cp \"$f\" /output/; done && ls -lh /output/ && echo 'Build artifacts copied to /output/'"]

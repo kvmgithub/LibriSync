@@ -29,6 +29,7 @@ show_help() {
     echo "  GIT_REPO    Git repository URL to clone (required)"
     echo "  GIT_BRANCH  Git branch to checkout (default: main)"
     echo "  BUILD_TYPE  Build type: 'debug' or 'release' (default: debug)"
+    echo "  BUNDLE_TYPE Bundle type: 'apk' or 'aab' (default: apk)"
     echo ""
     echo -e "${YELLOW}Examples:${NC}"
     echo "  # Build debug APK from git repository"
@@ -66,6 +67,7 @@ build_app() {
     echo -e "${YELLOW}Repository: $GIT_REPO${NC}"
     echo -e "${YELLOW}Branch: ${GIT_BRANCH:-main}${NC}"
     echo -e "${YELLOW}Build Type: ${BUILD_TYPE:-debug}${NC}"
+    echo -e "${YELLOW}Bundle Type: ${BUNDLE_TYPE:-apk}${NC}"
     echo ""
 
     # Create output directory
