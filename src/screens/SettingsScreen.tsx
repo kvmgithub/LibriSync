@@ -16,6 +16,7 @@ import {
   ExpoRustBridge,
 } from '../../modules/expo-rust-bridge';
 import { getDatabaseFiles } from '../utils/appPaths';
+import { useProviders } from '../contexts/ProvidersContext';
 import { checkForUpdate, isGithubReleaseBuild, type UpdateInfo } from '../utils/versionCheck';
 
 const DOWNLOAD_PATH_KEY = 'download_path';
@@ -31,7 +32,8 @@ type NamingPattern = 'flat_file' | 'author_book_folder' | 'author_series_book';
 
 export default function SettingsScreen() {
   const styles = useStyles(createStyles);
-  const { colors } = useTheme(); // For Switch components
+  const { colors } = useTheme();
+  const { providers, setProvider } = useProviders();
   const [downloadPath, setDownloadPath] = useState<string | null>(null);
   const [namingPattern, setNamingPattern] = useState<NamingPattern>('author_series_book');
   const [smartPlayerCover, setSmartPlayerCover] = useState(false);
@@ -503,6 +505,40 @@ export default function SettingsScreen() {
               onValueChange={handleAutoTokenRefreshChange}
               trackColor={{ false: colors.border, true: colors.accentDim }}
               thumbColor={autoTokenRefresh ? colors.accent : colors.textSecondary}
+            />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Providers</Text>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>LibriVox</Text>
+              <Text style={styles.settingDescription}>
+                Free public domain audiobooks
+              </Text>
+            </View>
+            <Switch
+              value={providers.librivox}
+              onValueChange={(value) => setProvider('librivox', value)}
+              trackColor={{ false: colors.border, true: colors.accentDim }}
+              thumbColor={providers.librivox ? colors.accent : colors.textSecondary}
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Audible</Text>
+              <Text style={styles.settingDescription}>
+                Sync and download your Audible library
+              </Text>
+            </View>
+            <Switch
+              value={providers.audible}
+              onValueChange={(value) => setProvider('audible', value)}
+              trackColor={{ false: colors.border, true: colors.accentDim }}
+              thumbColor={providers.audible ? colors.accent : colors.textSecondary}
             />
           </View>
         </View>

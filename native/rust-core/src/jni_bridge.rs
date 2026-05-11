@@ -908,6 +908,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                         "content_delivery_type": book.content_delivery_type,
                         "is_abridged": book.is_abridged,
                         "is_spatial": book.is_spatial,
+                        "source": book.source.as_deref().unwrap_or("audible"),
                     })
                 }).collect();
 
@@ -1009,6 +1010,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                         "content_delivery_type": book.content_delivery_type,
                         "is_abridged": book.is_abridged,
                         "is_spatial": book.is_spatial,
+                        "source": book.source.as_deref().unwrap_or("audible"),
                     });
                     Ok::<_, crate::LibationError>(book_json)
                 } else {
@@ -1145,6 +1147,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
             category: Option<String>,
             sort_field: Option<String>,
             sort_direction: Option<String>,
+            source: Option<String>,
         }
 
         match (move || -> crate::Result<String> {
@@ -1160,6 +1163,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                     search_query: params.search_query,
                     series_name: params.series_name,
                     category: params.category,
+                    source: params.source,
                     sort_field: None,
                     sort_direction: None,
                     limit: params.limit,
@@ -1228,6 +1232,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                         "content_delivery_type": book.content_delivery_type,
                         "is_abridged": book.is_abridged,
                         "is_spatial": book.is_spatial,
+                        "source": book.source.as_deref().unwrap_or("audible"),
                     })
                 }).collect();
 
@@ -3211,6 +3216,67 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeClearL
                 crate::storage::queries::clear_library(db.pool()).await?;
                 Ok(success_response(serde_json::json!({"deleted": true})))
             })
+        })() {
+            Ok(result) => result,
+            Err(e) => error_response(&e.to_string()),
+        }
+    });
+
+    env.new_string(response)
+        .expect("Failed to create Java string")
+        .into_raw()
+}
+
+// ============================================================================
+// LIBRIVOX
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeInsertLibrivoxBook(
+    mut env: JNIEnv,
+    _class: JClass,
+    params_json: JString,
+) -> jstring {
+    let params_str_result = jstring_to_string(&mut env, params_json);
+
+    let response = catch_panic(move || {
+        #[derive(Deserialize)]
+        struct Params {
+            db_path: String,
+            librivox_id: String,
+            title: String,
+            authors: Vec<String>,
+            narrators: Vec<String>,
+            description: Option<String>,
+            length_in_minutes: i32,
+            language: String,
+            cover_url: Option<String>,
+        }
+
+        match (move || -> crate::Result<String> {
+            let params_str = params_str_result?;
+            let params: Params = serde_json::from_str(&params_str)
+                .map_err(|e| crate::LibationError::InvalidInput(format!("Invalid JSON: {}", e)))?;
+
+            let result = RUNTIME.block_on(async {
+                let db = crate::storage::Database::new(&params.db_path).await?;
+                let book_id = crate::storage::queries::insert_librivox_book(
+                    db.pool(),
+                    &params.librivox_id,
+                    &params.title,
+                    &params.authors,
+                    &params.narrators,
+                    params.description.as_deref().unwrap_or(""),
+                    params.length_in_minutes,
+                    &params.language,
+                    params.cover_url.as_deref(),
+                )
+                .await?;
+
+                Ok::<_, crate::LibationError>(serde_json::json!({"book_id": book_id}))
+            })?;
+
+            Ok(success_response(result))
         })() {
             Ok(result) => result,
             Err(e) => error_response(&e.to_string()),

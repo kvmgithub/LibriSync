@@ -47,6 +47,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     run_migration(pool, 2, "download_tasks", create_download_tasks_table(pool)).await?;
     run_migration(pool, 3, "accounts", create_accounts_table(pool)).await?;
     run_migration(pool, 4, "download_conversion_columns", add_download_conversion_columns(pool)).await?;
+    run_migration(pool, 5, "add_source_column", add_source_column(pool)).await?;
 
     Ok(())
 }
@@ -536,6 +537,25 @@ END;
         "#,
     )
     .await?;
+
+    Ok(())
+}
+
+/// Add source column to Books table for multi-source support (LibriVox, etc.)
+///
+/// This allows books from different sources (Audible, LibriVox) to coexist
+/// in the same database. Existing books default to 'audible'.
+async fn add_source_column(pool: &SqlitePool) -> Result<()> {
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_table_info('Books')"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    if !columns.contains(&"source".to_string()) {
+        pool.execute("ALTER TABLE Books ADD COLUMN source TEXT NOT NULL DEFAULT 'audible'").await?;
+        pool.execute("CREATE INDEX IF NOT EXISTS idx_books_source ON Books(source)").await?;
+    }
 
     Ok(())
 }

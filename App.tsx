@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 import { useEffect } from 'react';
 import AppNavigator from './src/navigation/AppNavigator';
+import { ProvidersProvider } from './src/contexts/ProvidersContext';
 import { startBackgroundService } from './modules/expo-rust-bridge';
 
 export default function App() {
@@ -19,9 +20,9 @@ export default function App() {
   }, []);
 
   return (
-    <>
+    <ProvidersProvider>
       <AppNavigator />
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-    </>
+    </ProvidersProvider>
   );
 }

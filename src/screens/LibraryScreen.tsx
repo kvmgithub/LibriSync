@@ -26,21 +26,25 @@ import {
     requestNotificationPermission,
     getPrimaryAccount,
     saveAccount,
+    downloadLibrivoxFile,
 } from '../../modules/expo-rust-bridge';
 import type {Book, Account, DownloadTask} from '../../modules/expo-rust-bridge';
 import * as SecureStore from 'expo-secure-store';
 import * as DocumentPicker from 'expo-document-picker';
 import {getDatabasePath} from '../utils/appPaths';
+import {getBookSections} from '../services/librivox';
 
 const DOWNLOAD_PATH_KEY = 'download_path';
 const LIBRARY_PREFS_KEY = 'library_preferences';
 
 type SortField = 'title' | 'release_date' | 'date_added' | 'series';
 type SortDirection = 'asc' | 'desc';
+type SourceFilter = 'all' | 'audible' | 'librivox';
 
 interface LibraryPreferences {
     sortField: SortField;
     sortDirection: SortDirection;
+    sourceFilter?: SourceFilter;
 }
 
 export default function LibraryScreen() {
@@ -65,6 +69,7 @@ export default function LibraryScreen() {
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [selectedSeries, setSelectedSeries] = useState<string | null>(null);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
 
     // Filter options
     const [allSeries, setAllSeries] = useState<string[]>([]);
@@ -104,14 +109,14 @@ export default function LibraryScreen() {
                 clearTimeout(searchTimeout.current);
             }
         };
-    }, [searchQuery, sortField, sortDirection, selectedSeries, selectedCategory]);
+    }, [searchQuery, sortField, sortDirection, selectedSeries, selectedCategory, sourceFilter]);
 
     // Reload books when tab is focused
     useFocusEffect(
         React.useCallback(() => {
             console.log('[LibraryScreen] Tab focused, reloading books...');
             loadBooks(true);
-        }, [searchQuery, sortField, sortDirection, selectedSeries, selectedCategory])
+        }, [searchQuery, sortField, sortDirection, selectedSeries, selectedCategory, sourceFilter])
     );
 
     // Poll for download progress
@@ -150,6 +155,7 @@ export default function LibraryScreen() {
                 const prefs: LibraryPreferences = JSON.parse(prefsJson);
                 setSortField(prefs.sortField);
                 setSortDirection(prefs.sortDirection);
+                if (prefs.sourceFilter) setSourceFilter(prefs.sourceFilter);
             }
         } catch (error) {
             console.error('[LibraryScreen] Error loading preferences:', error);
@@ -224,7 +230,8 @@ export default function LibraryScreen() {
                 selectedSeries || null,
                 selectedCategory || null,
                 sortField,
-                sortDirection
+                sortDirection,
+                sourceFilter === 'all' ? null : sourceFilter
             );
 
             console.log('[LibraryScreen] Loaded books:', response.books.length, 'of', response.total_count);
@@ -276,6 +283,7 @@ export default function LibraryScreen() {
         setSearchQuery('');
         setSelectedSeries(null);
         setSelectedCategory(null);
+        setSourceFilter('all');
         setShowFilterModal(false);
     };
 
@@ -352,6 +360,51 @@ export default function LibraryScreen() {
 
     const handleDownload = async (book: Book) => {
         try {
+            const downloadDir = await SecureStore.getItemAsync(DOWNLOAD_PATH_KEY);
+            if (!downloadDir) {
+                Alert.alert(
+                    'Download Directory Not Set',
+                    'Please go to Settings and choose a download directory first.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+
+            // LibriVox books: direct MP3 download, no auth needed
+            if (book.source === 'librivox') {
+                console.log('[LibraryScreen] LibriVox download:', book.title);
+                const librivoxId = book.audible_product_id.replace('librivox_', '');
+
+                Alert.alert(
+                    'Downloading',
+                    `Downloading "${book.title}"... This may take a while.`
+                );
+
+                // Use the cover_url field which stores the archive.org cover,
+                // but we need the zip file URL. For now, construct it from LibriVox API.
+                // The download URL is fetched from the API or stored in the book data.
+                try {
+                    // Import the LibriVox API to get download URL
+                    const sections = await getBookSections(librivoxId);
+                    if (sections.length > 0 && sections[0].listen_url) {
+                        await downloadLibrivoxFile(
+                            librivoxId,
+                            book.title,
+                            sections[0].listen_url,
+                            downloadDir
+                        );
+                        Alert.alert('Download Complete', `"${book.title}" has been downloaded.`);
+                    } else {
+                        Alert.alert('Error', 'Could not find download URL for this book.');
+                    }
+                } catch (dlError: any) {
+                    console.error('[LibraryScreen] LibriVox download error:', dlError);
+                    Alert.alert('Download Failed', dlError.message || 'Unknown error');
+                }
+                return;
+            }
+
+            // Audible books: existing DRM download flow
             const hasPermission = await requestNotificationPermission();
             if (!hasPermission) {
                 Alert.alert(
@@ -395,17 +448,6 @@ export default function LibraryScreen() {
                         return;
                     }
                 }
-            }
-
-            const downloadDir = await SecureStore.getItemAsync(DOWNLOAD_PATH_KEY);
-
-            if (!downloadDir) {
-                Alert.alert(
-                    'Download Directory Not Set',
-                    'Please go to Settings and choose a download directory first.',
-                    [{ text: 'OK' }]
-                );
-                return;
             }
 
             console.log('[LibraryScreen] Enqueueing download:', book.title, book.audible_product_id);
@@ -719,6 +761,11 @@ export default function LibraryScreen() {
                         )}
                         <View style={styles.metadata}>
                             <Text style={styles.duration}>{formatDuration(item.duration_seconds)}</Text>
+                            {item.source === 'librivox' && (
+                                <View style={styles.sourceBadge}>
+                                    <Text style={styles.sourceBadgeText}>LibriVox</Text>
+                                </View>
+                            )}
                             <Text style={[styles.status, {color: status.color}]}>
                                 {status.text}
                             </Text>
@@ -801,6 +848,7 @@ export default function LibraryScreen() {
         let count = 0;
         if (selectedSeries) count++;
         if (selectedCategory) count++;
+        if (sourceFilter !== 'all') count++;
         return count;
     };
 
@@ -893,9 +941,9 @@ export default function LibraryScreen() {
                             : 'No audiobooks yet'}
                     </Text>
                     <Text style={styles.emptySubtext}>
-                        {searchQuery || selectedSeries || selectedCategory
+                        {searchQuery || selectedSeries || selectedCategory || sourceFilter !== 'all'
                             ? 'Try adjusting your search or clearing filters'
-                            : 'Go to Account tab to sign in and sync your Audible library'}
+                            : 'Go to Account tab to sign in and sync your Audible library, or browse free audiobooks on the Browse tab'}
                     </Text>
                 </View>
             ) : (
@@ -1013,6 +1061,24 @@ export default function LibraryScreen() {
                         </View>
 
                         <ScrollView style={styles.filterScroll}>
+                            {/* Source Filter */}
+                            <Text style={styles.filterSectionTitle}>Source</Text>
+                            {(['all', 'audible', 'librivox'] as SourceFilter[]).map((src) => (
+                                <TouchableOpacity
+                                    key={src}
+                                    style={[
+                                        styles.filterOption,
+                                        sourceFilter === src && styles.filterOptionSelected
+                                    ]}
+                                    onPress={() => setSourceFilter(src)}
+                                >
+                                    <Text style={styles.filterOptionText}>
+                                        {src === 'all' ? 'All Sources' : src === 'audible' ? 'Audible' : 'LibriVox'}
+                                    </Text>
+                                    {sourceFilter === src && <Text style={styles.modalCheck}>✓</Text>}
+                                </TouchableOpacity>
+                            ))}
+
                             {/* Series Filter */}
                             <Text style={styles.filterSectionTitle}>Series</Text>
                             <TouchableOpacity
@@ -1313,6 +1379,17 @@ const createStyles = (theme: Theme) => ({
     status: {
         ...theme.typography.caption,
         fontWeight: '600' as const,
+    },
+    sourceBadge: {
+        backgroundColor: theme.colors.accentSecondary + '30',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    sourceBadgeText: {
+        fontSize: 10,
+        fontWeight: '600' as const,
+        color: theme.colors.accentSecondary,
     },
     separator: {
         height: theme.spacing.sm,

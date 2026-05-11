@@ -201,6 +201,7 @@ export interface Book {
   file_path?: string;
   created_at: string;
   updated_at: string;
+  source?: 'audible' | 'librivox';
 
   // Additional metadata from API
   pdf_url?: string;
@@ -412,7 +413,7 @@ export interface ExpoRustBridgeModule {
     seriesName?: string | null,
     category?: string | null,
     sortField?: string | null,
-    sortDirection?: string | null
+    extras?: string | null
   ): RustResponse<{ books: Book[]; total_count: number }>;
 
   /**
@@ -864,6 +865,25 @@ export interface ExpoRustBridgeModule {
    * @returns Current setting
    */
   getSmartPlayerCover(): RustResponse<{ enabled: boolean }>;
+
+  // --------------------------------------------------------------------------
+  // LibriVox
+  // --------------------------------------------------------------------------
+
+  /**
+   * Insert a LibriVox book into the database.
+   */
+  insertLibrivoxBook(dbPath: string, bookJson: string): Promise<RustResponse<{ book_id: number }>>;
+
+  /**
+   * Download a LibriVox MP3 file directly to the output directory.
+   */
+  downloadLibrivoxFile(
+    librivoxId: string,
+    title: string,
+    downloadUrl: string,
+    outputDirectory: string
+  ): Promise<RustResponse<{ output_path: string; total_bytes: number }>>;
 }
 
 // ============================================================================
@@ -1224,8 +1244,18 @@ function getBooksWithFilters(
   seriesName?: string | null,
   category?: string | null,
   sortField?: string | null,
-  sortDirection?: string | null
+  sortDirection?: string | null,
+  source?: string | null
 ): { books: Book[]; total_count: number } {
+  // Pack sortDirection and source into extras JSON (Kotlin Function limit: 8 params)
+  let extras: string | null = null;
+  if (sortDirection || source) {
+    const extrasObj: Record<string, string> = {};
+    if (sortDirection) extrasObj.sort_direction = sortDirection;
+    if (source) extrasObj.source = source;
+    extras = JSON.stringify(extrasObj);
+  }
+
   const response = NativeModule!.getBooksWithFilters(
     dbPath,
     offset,
@@ -1234,7 +1264,7 @@ function getBooksWithFilters(
     seriesName || null,
     category || null,
     sortField || null,
-    sortDirection || null
+    extras
   );
   return unwrapResult(response);
 }
@@ -1779,6 +1809,60 @@ async function clearLibrary(dbPath: string): Promise<void> {
 }
 
 // ============================================================================
+// LibriVox Functions
+// ============================================================================
+
+/**
+ * Insert a LibriVox book into the database.
+ *
+ * @param dbPath - Database path
+ * @param bookData - Book data object with librivox_id, title, authors, etc.
+ * @returns book_id of the inserted book
+ */
+async function insertLibrivoxBook(
+  dbPath: string,
+  bookData: {
+    librivox_id: string;
+    title: string;
+    authors: string[];
+    narrators?: string[];
+    description?: string;
+    length_in_minutes: number;
+    language: string;
+    cover_url?: string;
+  }
+): Promise<number> {
+  const response = await NativeModule!.insertLibrivoxBook(dbPath, JSON.stringify(bookData));
+  const data = unwrapResult(response);
+  return data.book_id;
+}
+
+/**
+ * Download a LibriVox MP3 file directly to the output directory.
+ * Skips the Audible DRM pipeline — just a simple HTTP download.
+ *
+ * @param librivoxId - LibriVox book ID
+ * @param title - Book title
+ * @param downloadUrl - Direct MP3 download URL
+ * @param outputDirectory - SAF URI for the output directory
+ * @returns Output path and total bytes
+ */
+async function downloadLibrivoxFile(
+  librivoxId: string,
+  title: string,
+  downloadUrl: string,
+  outputDirectory: string
+): Promise<{ output_path: string; total_bytes: number }> {
+  const response = await NativeModule!.downloadLibrivoxFile(
+    librivoxId,
+    title,
+    downloadUrl,
+    outputDirectory
+  );
+  return unwrapResult(response);
+}
+
+// ============================================================================
 // Periodic Worker Scheduling
 // ============================================================================
 
@@ -1978,6 +2062,9 @@ export {
   saveAccount,
   getPrimaryAccount,
   deleteAccount,
+  // LibriVox
+  insertLibrivoxBook,
+  downloadLibrivoxFile,
   // Testing
   clearDownloadState,
   getBookFilePath,

@@ -177,6 +177,10 @@ pub struct BookWithRelations {
     pub created_at: String,
     pub updated_at: String,
 
+    // Source (audible, librivox)
+    #[sqlx(default)]
+    pub source: Option<String>,
+
     // Related data (comma-separated strings)
     pub authors_str: Option<String>,
     pub narrators_str: Option<String>,
@@ -298,6 +302,7 @@ pub async fn list_books_with_relations(pool: &SqlitePool, limit: i64, offset: i6
             b.content_delivery_type,
             b.created_at,
             b.updated_at,
+            COALESCE(b.source, 'audible') as source,
             ba.authors as authors_str,
             bn.narrators as narrators_str,
             bp.publisher,
@@ -388,6 +393,7 @@ pub async fn find_book_with_relations_by_asin(pool: &SqlitePool, asin: &str) -> 
             b.content_delivery_type,
             b.created_at,
             b.updated_at,
+            COALESCE(b.source, 'audible') as source,
             ba.authors as authors_str,
             bn.narrators as narrators_str,
             bp.publisher,
@@ -440,6 +446,7 @@ pub struct BookQueryParams {
     pub search_query: Option<String>,  // Search in title, author, narrator
     pub series_name: Option<String>,   // Filter by series
     pub category: Option<String>,      // Filter by genre/category
+    pub source: Option<String>,        // Filter by source (audible, librivox)
     pub sort_field: Option<SortField>,
     pub sort_direction: Option<SortDirection>,
     pub limit: i64,
@@ -483,6 +490,12 @@ pub async fn list_books_with_filters(
              WHERE bc.book_id = b.book_id AND cl.ladder LIKE ?)"
         );
         bind_values.push(format!("%{}%", category));
+    }
+
+    // Source filter
+    if let Some(ref source) = params.source {
+        where_clauses.push("COALESCE(b.source, 'audible') = ?");
+        bind_values.push(source.clone());
     }
 
     let where_clause = if where_clauses.is_empty() {
@@ -579,6 +592,7 @@ pub async fn list_books_with_filters(
             b.content_delivery_type,
             b.created_at,
             b.updated_at,
+            COALESCE(b.source, 'audible') as source,
             book_authors.authors as authors_str,
             book_narrators.narrators as narrators_str,
             book_publishers.publisher,
@@ -650,6 +664,12 @@ pub async fn count_books_with_filters(
              WHERE bc.book_id = b.book_id AND cl.ladder LIKE ?)"
         );
         bind_values.push(format!("%{}%", category));
+    }
+
+    // Source filter
+    if let Some(ref source) = params.source {
+        where_clauses.push("COALESCE(b.source, 'audible') = ?");
+        bind_values.push(source.clone());
     }
 
     let where_clause = if where_clauses.is_empty() {
@@ -1415,6 +1435,79 @@ pub async fn clear_library(pool: &SqlitePool) -> Result<()> {
     sqlx::query("DELETE FROM CategoryLadders").execute(pool).await?;
 
     Ok(())
+}
+
+/// Insert a LibriVox book with all related data in one operation.
+///
+/// This handles inserting into Books (with source='librivox'), LibraryBooks,
+/// UserDefinedItems, and Contributors tables.
+pub async fn insert_librivox_book(
+    pool: &SqlitePool,
+    librivox_id: &str,
+    title: &str,
+    authors: &[String],
+    narrators: &[String],
+    description: &str,
+    length_in_minutes: i32,
+    language: &str,
+    cover_url: Option<&str>,
+) -> Result<i64> {
+    let product_id = format!("librivox_{}", librivox_id);
+
+    // Check if already exists
+    if let Some(existing) = find_book_by_asin(pool, &product_id).await? {
+        return Ok(existing.book_id);
+    }
+
+    // Insert book with source='librivox'
+    let result = sqlx::query(
+        r#"
+        INSERT INTO Books (
+            audible_product_id, title, subtitle, description, length_in_minutes,
+            content_type, locale, picture_large, source,
+            is_abridged, is_spatial, language,
+            rating_overall, rating_performance, rating_story,
+            is_finished, is_downloadable, is_ayce
+        ) VALUES (?, ?, NULL, ?, ?, 1, ?, ?, 'librivox', 0, 0, ?, 0.0, 0.0, 0.0, 0, 1, 0)
+        "#,
+    )
+    .bind(&product_id)
+    .bind(title)
+    .bind(description)
+    .bind(length_in_minutes)
+    .bind(language)
+    .bind(cover_url)
+    .bind(language)
+    .execute(pool)
+    .await?;
+
+    let book_id = result.last_insert_rowid();
+
+    // Insert LibraryBook
+    let lib_book = NewLibraryBook {
+        book_id,
+        account: "librivox".to_string(),
+    };
+    insert_library_book(pool, &lib_book).await?;
+
+    // Insert UserDefinedItem
+    insert_user_defined_item(pool, &NewUserDefinedItem::new(book_id)).await?;
+
+    // Insert authors
+    for (i, author) in authors.iter().enumerate() {
+        let contributor = NewContributor::new(author.clone());
+        let contributor_id = upsert_contributor(pool, &contributor).await?;
+        add_book_contributor(pool, book_id, contributor_id, Role::Author as i32, i as i16).await?;
+    }
+
+    // Insert narrators
+    for (i, narrator) in narrators.iter().enumerate() {
+        let contributor = NewContributor::new(narrator.clone());
+        let contributor_id = upsert_contributor(pool, &contributor).await?;
+        add_book_contributor(pool, book_id, contributor_id, Role::Narrator as i32, i as i16).await?;
+    }
+
+    Ok(book_id)
 }
 
 #[cfg(test)]

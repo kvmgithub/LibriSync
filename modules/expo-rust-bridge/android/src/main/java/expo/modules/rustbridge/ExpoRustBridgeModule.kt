@@ -242,7 +242,7 @@ class ExpoRustBridgeModule : Module() {
       seriesName: String?,
       category: String?,
       sortField: String?,
-      sortDirection: String?
+      extras: String?
     ->
       val params = JSONObject().apply {
         put("db_path", dbPath)
@@ -252,7 +252,17 @@ class ExpoRustBridgeModule : Module() {
         if (seriesName != null) put("series_name", seriesName)
         if (category != null) put("category", category)
         if (sortField != null) put("sort_field", sortField)
-        if (sortDirection != null) put("sort_direction", sortDirection)
+        // extras is a JSON string with optional sort_direction and source
+        if (extras != null) {
+          try {
+            val extrasObj = JSONObject(extras)
+            if (extrasObj.has("sort_direction")) put("sort_direction", extrasObj.getString("sort_direction"))
+            if (extrasObj.has("source")) put("source", extrasObj.getString("source"))
+          } catch (_: Exception) {
+            // If extras is not valid JSON, treat it as sort_direction for backward compat
+            put("sort_direction", extras)
+          }
+        }
       }
       parseJsonResponse(nativeGetBooksWithFilters(params.toString()))
     }
@@ -1060,6 +1070,102 @@ class ExpoRustBridgeModule : Module() {
       }
     }
 
+    // ========================================================================
+    // LibriVox Functions
+    // ========================================================================
+
+    AsyncFunction("insertLibrivoxBook") { dbPath: String, bookJson: String ->
+      try {
+        val bookData = JSONObject(bookJson)
+        val params = JSONObject().apply {
+          put("db_path", dbPath)
+          put("librivox_id", bookData.getString("librivox_id"))
+          put("title", bookData.getString("title"))
+          put("authors", bookData.getJSONArray("authors"))
+          put("narrators", bookData.optJSONArray("narrators") ?: org.json.JSONArray())
+          put("description", bookData.optString("description", ""))
+          put("length_in_minutes", bookData.optInt("length_in_minutes", 0))
+          put("language", bookData.optString("language", "en"))
+          if (bookData.has("cover_url")) put("cover_url", bookData.getString("cover_url"))
+        }
+        val result = nativeInsertLibrivoxBook(params.toString())
+        parseJsonResponse(result)
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
+    AsyncFunction("downloadLibrivoxFile") { librivoxId: String, title: String, downloadUrl: String, outputDirectory: String ->
+      try {
+        val context = appContext.reactContext ?: throw Exception("Context not available")
+        val dbPath = AppPaths.databasePath(context)
+
+        // Download to cache first
+        val cacheDir = java.io.File(context.cacheDir, "librivox")
+        cacheDir.mkdirs()
+        val fileName = "${librivoxId}_${title.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.mp3"
+        val cacheFile = java.io.File(cacheDir, fileName)
+
+        val url = java.net.URL(downloadUrl)
+        val connection = url.openConnection() as java.net.HttpURLConnection
+        connection.connectTimeout = 30000
+        connection.readTimeout = 30000
+        connection.connect()
+
+        val totalBytes = connection.contentLengthLong
+
+        connection.inputStream.use { input ->
+          java.io.FileOutputStream(cacheFile).use { output ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Long = 0
+            var len: Int
+            while (input.read(buffer).also { len = it } != -1) {
+              output.write(buffer, 0, len)
+              bytesRead += len
+            }
+          }
+        }
+        connection.disconnect()
+
+        // Copy to SAF output directory
+        val treeUri = android.net.Uri.parse(outputDirectory)
+        val docDir = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+          ?: throw Exception("Invalid output directory")
+
+        val outputFile = docDir.createFile("audio/mpeg", fileName)
+          ?: throw Exception("Failed to create file in output directory")
+
+        context.contentResolver.openOutputStream(outputFile.uri)?.use { outputStream ->
+          java.io.FileInputStream(cacheFile).use { inputStream ->
+            inputStream.copyTo(outputStream)
+          }
+        } ?: throw Exception("Failed to open output stream")
+
+        // Mark as downloaded in database
+        val asin = "librivox_$librivoxId"
+        val setPathParams = JSONObject().apply {
+          put("db_path", dbPath)
+          put("asin", asin)
+          put("title", title)
+          put("file_path", outputFile.uri.toString())
+        }
+        nativeSetBookFilePath(setPathParams.toString())
+
+        // Clean up cache
+        cacheFile.delete()
+
+        mapOf(
+          "success" to true,
+          "data" to mapOf(
+            "output_path" to outputFile.uri.toString(),
+            "total_bytes" to totalBytes
+          )
+        )
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
     /**
      * Test bridge connection and verify Rust library is loaded.
      *
@@ -1770,5 +1876,8 @@ class ExpoRustBridgeModule : Module() {
     @JvmStatic external fun nativeClearBookDownloadState(paramsJson: String): String
     @JvmStatic external fun nativeSetBookFilePath(paramsJson: String): String
     @JvmStatic external fun nativeClearLibrary(paramsJson: String): String
+
+    // LibriVox
+    @JvmStatic external fun nativeInsertLibrivoxBook(paramsJson: String): String
   }
 }
