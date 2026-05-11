@@ -3,7 +3,8 @@ name: Build Signed Release APK
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'  # Trigger on semantic version tags like v1.0.0, v0.0.4
+      - 'v[0-9]+.[0-9]+.[0-9]+'       # GitHub release: v1.0.0
+      - 'v[0-9]+.[0-9]+.[0-9]+-play'  # Play Store release: v1.0.0-play
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
@@ -34,14 +35,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract version from tag
+      - name: Extract version and build type from tag
         id: version
         run: |
-          # Extract version from tag (v0.0.5 -> 0.0.5)
-          VERSION=${{ github.ref_name }}
-          VERSION=${VERSION#v}  # Remove 'v' prefix
+          TAG=${{ github.ref_name }}
+          VERSION=${TAG#v}           # Remove 'v' prefix
+          VERSION=${VERSION%-play}   # Remove '-play' suffix if present
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
+
+          # Play Store builds don't get the update checker
+          if [[ "$TAG" == *-play ]]; then
+            echo "github_release=false" >> $GITHUB_OUTPUT
+            echo "Building Play Store version: $VERSION"
+          else
+            echo "github_release=true" >> $GITHUB_OUTPUT
+            echo "Building GitHub version: $VERSION"
+          fi
 
       - name: Build signed release APK
         env:
@@ -49,7 +58,7 @@ jobs:
           GIT_BRANCH: ${{ github.ref_name }}
           BUILD_TYPE: release
           APP_VERSION: ${{ steps.version.outputs.version }}
-          GITHUB_RELEASE: "true"
+          GITHUB_RELEASE: ${{ steps.version.outputs.github_release }}
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
