@@ -10,6 +10,9 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import expo.modules.rustbridge.AppPaths
+import expo.modules.rustbridge.DownloadService
+import expo.modules.rustbridge.workers.WorkerScheduler
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 
@@ -49,22 +52,18 @@ class BackgroundTaskService : Service() {
         const val EXTRA_FULL_SYNC = "full_sync"
 
         /**
-         * Start the background service
+         * No-op compatibility entry point.
+         *
+         * Periodic background work is owned by WorkManager. Starting an idle
+         * dataSync foreground service on app start would burn Android 15's
+         * foreground-service budget and can be rejected from background starts.
          */
         fun start(context: Context) {
-            val intent = Intent(context, BackgroundTaskService::class.java).apply {
-                action = ACTION_START_SERVICE
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            Log.d(TAG, "BackgroundTaskService.start() ignored; WorkManager owns periodic work")
         }
 
         /**
-         * Enqueue a download
+         * Enqueue a user-requested download using the dedicated download service.
          */
         fun enqueueDownload(
             context: Context,
@@ -75,41 +74,26 @@ class BackgroundTaskService : Service() {
             outputDirectory: String,
             quality: String = "High"
         ) {
-            val intent = Intent(context, BackgroundTaskService::class.java).apply {
-                action = ACTION_ENQUEUE_DOWNLOAD
-                putExtra(EXTRA_ASIN, asin)
-                putExtra(EXTRA_TITLE, title)
-                putExtra(EXTRA_AUTHOR, author)
-                putExtra(EXTRA_ACCOUNT_JSON, accountJson)
-                putExtra(EXTRA_OUTPUT_DIR, outputDirectory)
-                putExtra(EXTRA_QUALITY, quality)
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            DownloadService.enqueueBook(
+                context,
+                AppPaths.databasePath(context),
+                accountJson,
+                asin,
+                title,
+                outputDirectory,
+                quality
+            )
         }
 
         /**
-         * Start library sync
+         * Start an immediate library sync through WorkManager.
          */
         fun startLibrarySync(context: Context, fullSync: Boolean = false) {
-            val intent = Intent(context, BackgroundTaskService::class.java).apply {
-                action = ACTION_START_SYNC
-                putExtra(EXTRA_FULL_SYNC, fullSync)
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            WorkerScheduler.enqueueLibrarySyncNow(context, fullSync)
         }
 
         /**
-         * Stop the background service (disables all automatic features)
+         * Stop the legacy foreground service if an older build left it running.
          */
         fun stopService(context: Context) {
             val intent = Intent(context, BackgroundTaskService::class.java)
@@ -137,10 +121,6 @@ class BackgroundTaskService : Service() {
         // Get task manager instance
         taskManager = BackgroundTaskManager.getInstance(applicationContext)
         notificationManager = BackgroundNotificationManager(applicationContext)
-
-        // Start foreground immediately
-        val initialNotification = notificationManager.getInitialNotification()
-        startForeground(BackgroundNotificationManager.NOTIFICATION_ID, initialNotification)
 
         // Start task manager
         taskManager.start()
@@ -176,7 +156,7 @@ class BackgroundTaskService : Service() {
             }
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -348,7 +328,6 @@ class BackgroundTaskService : Service() {
                     // Check if we should stop the service
                     if (activeTasks.isEmpty()) {
                         Log.d(TAG, "No active tasks - stopping service")
-                        stopForeground(true) // Remove notification
                         stopSelf()
                         break
                     } else {

@@ -1113,7 +1113,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeSearch
 ///   "search_query": "harry potter",  // optional
 ///   "series_name": "Harry Potter",   // optional
 ///   "category": "Fantasy",           // optional
-///   "sort_field": "title",           // "title" | "release_date" | "date_added"
+///   "sort_field": "title",           // "title" | "release_date" | "date_added" | "series" | "length"
 ///   "sort_direction": "asc"          // "asc" | "desc"
 /// }
 /// ```
@@ -1177,6 +1177,7 @@ pub extern "C" fn Java_expo_modules_rustbridge_ExpoRustBridgeModule_nativeGetBoo
                         "release_date" => Some(crate::storage::SortField::ReleaseDate),
                         "date_added" => Some(crate::storage::SortField::DateAdded),
                         "series" => Some(crate::storage::SortField::Series),
+                        "length" => Some(crate::storage::SortField::Length),
                         _ => None,
                     };
                 }

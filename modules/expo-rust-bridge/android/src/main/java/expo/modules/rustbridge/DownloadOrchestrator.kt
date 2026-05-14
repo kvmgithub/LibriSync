@@ -718,6 +718,13 @@ class DownloadOrchestrator(
     }
 
     /**
+     * Pause downloads before the OS removes foreground execution time.
+     */
+    suspend fun pauseActiveDownloadsForServiceTimeout() {
+        pauseAllActiveDownloads()
+    }
+
+    /**
      * Resume all paused downloads (except manually paused ones)
      */
     private suspend fun resumeAllPausedDownloads() = withContext(Dispatchers.IO) {

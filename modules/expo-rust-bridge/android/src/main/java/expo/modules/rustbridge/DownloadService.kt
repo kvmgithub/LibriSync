@@ -3,6 +3,7 @@ package expo.modules.rustbridge
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -42,8 +43,25 @@ class DownloadService : Service() {
         private const val EXTRA_TASK_ID = "task_id"
         private const val EXTRA_WIFI_ONLY = "wifi_only"
 
+        private fun startUserInitiatedService(context: Context, intent: Intent) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    e.javaClass.name == "android.app.ForegroundServiceStartNotAllowedException"
+                ) {
+                    Log.e(TAG, "Blocked dataSync foreground service start; downloads must be started from a visible user action", e)
+                }
+                throw e
+            }
+        }
+
         /**
-         * Enqueue a book download
+         * Enqueue a book download from a direct user action.
          */
         fun enqueueBook(
             context: Context,
@@ -64,11 +82,7 @@ class DownloadService : Service() {
                 putExtra(EXTRA_QUALITY, quality)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            startUserInitiatedService(context, intent)
         }
 
         /**
@@ -116,11 +130,7 @@ class DownloadService : Service() {
                 putExtra(EXTRA_ASIN, asin)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            startUserInitiatedService(context, intent)
         }
     }
 
@@ -128,6 +138,7 @@ class DownloadService : Service() {
     private lateinit var notificationManager: DownloadNotificationManager
     private lateinit var dbPath: String
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var isForeground = false
 
     // Track current download info for notifications
     private var currentDownload: DownloadInfo? = null
@@ -170,6 +181,7 @@ class DownloadService : Service() {
                 notificationManager.showCompletion(download.title, download.author, outputPath)
             }
             currentDownload = null
+            checkAndStopServiceIfIdle()
         }
 
         orchestrator.setErrorCallback { asin, title, error ->
@@ -177,18 +189,26 @@ class DownloadService : Service() {
                 notificationManager.showError(download.title, download.author, error)
             }
             currentDownload = null
+            checkAndStopServiceIfIdle()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: ${intent?.action}")
 
-        // Start foreground immediately
-        val initialNotification = notificationManager.getInitialNotification()
-        Log.d(TAG, "Starting foreground service with notification")
-        startForeground(NOTIFICATION_ID, initialNotification)
+        if (intent == null) {
+            Log.w(TAG, "Restarted without an intent; stopping to avoid sticky dataSync foreground work")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
-        when (intent?.action) {
+        if (requiresForeground(intent.action)) {
+            val initialNotification = notificationManager.getInitialNotification()
+            Log.d(TAG, "Starting typed dataSync foreground service with notification")
+            startDataSyncForeground(initialNotification)
+        }
+
+        when (intent.action) {
             ACTION_ENQUEUE_DOWNLOAD -> handleEnqueueDownload(intent)
             ACTION_PAUSE_TASK -> handlePauseTask(intent)
             ACTION_RESUME_TASK -> handleResumeTask(intent)
@@ -198,7 +218,7 @@ class DownloadService : Service() {
             ACTION_RETRY_CONVERSION -> handleRetryConversion(intent)
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -208,6 +228,48 @@ class DownloadService : Service() {
         Log.d(TAG, "Service destroyed")
         orchestrator.shutdown()
         serviceScope.cancel()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "dataSync foreground service timed out (type=$fgsType); pausing downloads and stopping")
+        if (::orchestrator.isInitialized) {
+            runBlocking {
+                withTimeoutOrNull(2_000) {
+                    orchestrator.pauseActiveDownloadsForServiceTimeout()
+                }
+            }
+        }
+        stopForegroundCompat()
+        stopSelf(startId)
+    }
+
+    private fun requiresForeground(action: String?): Boolean {
+        return action == ACTION_ENQUEUE_DOWNLOAD || action == ACTION_RETRY_CONVERSION
+    }
+
+    private fun startDataSyncForeground(notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        isForeground = true
+    }
+
+    private fun stopForegroundCompat() {
+        if (!isForeground) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        isForeground = false
     }
 
     // ========================================================================
@@ -335,7 +397,7 @@ class DownloadService : Service() {
 
                 if (tasks.length() == 0) {
                     Log.d(TAG, "No active downloads remaining - stopping service")
-                    stopForeground(true) // Remove notification
+                    stopForegroundCompat()
                     stopSelf()
                 } else {
                     Log.d(TAG, "${tasks.length()} downloads still active - keeping service alive")

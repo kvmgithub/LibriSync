@@ -432,6 +432,7 @@ pub enum SortField {
     ReleaseDate,
     DateAdded,
     Series,
+    Length,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -512,6 +513,8 @@ pub async fn list_books_with_filters(
         (Some(SortField::ReleaseDate), Some(SortDirection::Desc)) => "ORDER BY b.date_published DESC",
         (Some(SortField::DateAdded), Some(SortDirection::Asc)) => "ORDER BY lb.date_added ASC",
         (Some(SortField::DateAdded), Some(SortDirection::Desc)) => "ORDER BY lb.date_added DESC",
+        (Some(SortField::Length), Some(SortDirection::Asc)) => "ORDER BY b.length_in_minutes ASC, b.title ASC",
+        (Some(SortField::Length), Some(SortDirection::Desc)) => "ORDER BY b.length_in_minutes DESC, b.title ASC",
         (Some(SortField::Series), Some(SortDirection::Asc)) => {
             "ORDER BY CASE WHEN book_series_first.series_name IS NULL THEN 1 ELSE 0 END, book_series_first.series_name ASC, book_series_first.series_sequence ASC"
         },
@@ -1579,5 +1582,66 @@ mod tests {
             .expect("Failed to upsert contributor");
 
         assert_eq!(contributor_id, contributor_id2);
+    }
+
+    #[tokio::test]
+    async fn test_list_books_with_filters_sorts_by_length() {
+        let db = Database::new_in_memory().await.expect("Failed to create database");
+
+        let books = [
+            ("B000000001", "Medium Book", 120),
+            ("B000000002", "Short Book", 45),
+            ("B000000003", "Long Book", 360),
+        ];
+
+        for (asin, title, length_in_minutes) in books {
+            let mut book = NewBook::new(asin.to_string(), title.to_string(), "us".to_string());
+            book.length_in_minutes = length_in_minutes;
+
+            let book_id = insert_book(db.pool(), &book)
+                .await
+                .expect("Failed to insert book");
+
+            insert_library_book(
+                db.pool(),
+                &NewLibraryBook {
+                    book_id,
+                    account: "test@example.com".to_string(),
+                },
+            )
+            .await
+            .expect("Failed to insert library book");
+        }
+
+        let params = BookQueryParams {
+            sort_field: Some(SortField::Length),
+            sort_direction: Some(SortDirection::Asc),
+            limit: 10,
+            offset: 0,
+            ..Default::default()
+        };
+
+        let ascending = list_books_with_filters(db.pool(), &params)
+            .await
+            .expect("Failed to list books");
+
+        assert_eq!(
+            ascending.iter().map(|book| book.title.as_str()).collect::<Vec<_>>(),
+            vec!["Short Book", "Medium Book", "Long Book"]
+        );
+
+        let params = BookQueryParams {
+            sort_direction: Some(SortDirection::Desc),
+            ..params
+        };
+
+        let descending = list_books_with_filters(db.pool(), &params)
+            .await
+            .expect("Failed to list books");
+
+        assert_eq!(
+            descending.iter().map(|book| book.title.as_str()).collect::<Vec<_>>(),
+            vec!["Long Book", "Medium Book", "Short Book"]
+        );
     }
 }
