@@ -401,7 +401,7 @@ export interface ExpoRustBridgeModule {
    * @param searchQuery - Optional search query (searches title, author, narrator)
    * @param seriesName - Optional series filter
    * @param category - Optional category/genre filter
-   * @param sortField - Sort field: "title" | "release_date" | "date_added"
+   * @param sortField - Sort field: "title" | "release_date" | "date_added" | "series" | "length"
    * @param sortDirection - Sort direction: "asc" | "desc"
    * @returns Array of books and total count
    */
@@ -613,12 +613,12 @@ export interface ExpoRustBridgeModule {
   // --------------------------------------------------------------------------
 
   /**
-   * Start the background task service.
+   * Compatibility no-op. Periodic work is scheduled through WorkManager.
    */
   startBackgroundService(): RustResponse<{ success: boolean }>;
 
   /**
-   * Stop the background task service.
+   * Stop the legacy background task service if it is running.
    */
   stopBackgroundService(): RustResponse<{ success: boolean }>;
 
@@ -635,7 +635,7 @@ export interface ExpoRustBridgeModule {
   ): Promise<RustResponse<{ message: string }>>;
 
   /**
-   * Start library sync using the new system.
+   * Schedule an immediate library sync through WorkManager.
    */
   startLibrarySyncNew(fullSync: boolean): Promise<RustResponse<{ message: string }>>;
 
@@ -1232,7 +1232,7 @@ function getBooks(dbPath: string, offset: number, limit: number): { books: Book[
  * @param searchQuery - Optional search query (searches title, author, narrator)
  * @param seriesName - Optional series filter
  * @param category - Optional category/genre filter
- * @param sortField - Sort field: "title" | "release_date" | "date_added"
+ * @param sortField - Sort field: "title" | "release_date" | "date_added" | "series" | "length"
  * @param sortDirection - Sort direction: "asc" | "desc"
  * @returns Books and total count
  */
@@ -1469,8 +1469,7 @@ export interface BackgroundTask {
 }
 
 /**
- * Start the background task service.
- * Must be called once when app starts.
+ * Compatibility no-op. Periodic work is scheduled through WorkManager.
  */
 function startBackgroundService(): void {
   const response = NativeModule!.startBackgroundService();
@@ -1480,8 +1479,7 @@ function startBackgroundService(): void {
 }
 
 /**
- * Stop the background task service.
- * This disables all automatic features (token refresh, library sync, auto-download).
+ * Stop the legacy background task service if it is running.
  */
 function stopBackgroundService(): void {
   const response = NativeModule!.stopBackgroundService();
@@ -1525,14 +1523,14 @@ async function enqueueDownloadNew(
 }
 
 /**
- * Start library sync using the new background task system.
+ * Schedule an immediate library sync through WorkManager.
  *
  * @param fullSync - Whether to do a full sync (default: false)
  */
 async function startLibrarySyncNew(fullSync: boolean = false): Promise<void> {
   const response = await NativeModule!.startLibrarySyncNew(fullSync);
   if (!response.success) {
-    throw new RustBridgeError(response.error || 'Failed to start library sync');
+    throw new RustBridgeError(response.error || 'Failed to schedule library sync');
   }
 }
 

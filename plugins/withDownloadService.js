@@ -9,26 +9,7 @@ const { withAndroidManifest } = require('@expo/config-plugins');
 const withDownloadService = (config) => {
   return withAndroidManifest(config, async (config) => {
     const androidManifest = config.modResults;
-    const manifest = androidManifest.manifest;
     const application = androidManifest.manifest.application[0];
-
-    const ensurePermission = (name) => {
-      if (!manifest['uses-permission']) {
-        manifest['uses-permission'] = [];
-      }
-
-      const exists = manifest['uses-permission'].some(
-        (permission) => permission.$['android:name'] === name
-      );
-
-      if (!exists) {
-        manifest['uses-permission'].push({
-          $: {
-            'android:name': name,
-          },
-        });
-      }
-    };
 
     const ensureService = (name, attrs) => {
       if (!application.service) {
@@ -86,16 +67,8 @@ const withDownloadService = (config) => {
       }
     };
 
-    ensurePermission('android.permission.RECEIVE_BOOT_COMPLETED');
-
     // Add DownloadService
     ensureService('expo.modules.rustbridge.DownloadService', {
-      'android:exported': 'false',
-      'android:foregroundServiceType': 'dataSync',
-    });
-
-    // Add BackgroundTaskService
-    ensureService('expo.modules.rustbridge.tasks.BackgroundTaskService', {
       'android:exported': 'false',
       'android:foregroundServiceType': 'dataSync',
     });
@@ -110,17 +83,6 @@ const withDownloadService = (config) => {
         'expo.modules.rustbridge.CANCEL_DOWNLOAD',
       ]
     );
-
-    // Add BootReceiver
-    ensureReceiver(
-      'expo.modules.rustbridge.tasks.BootReceiver',
-      { 'android:exported': 'false' },
-      [
-        'android.intent.action.BOOT_COMPLETED',
-        'android.intent.action.MY_PACKAGE_REPLACED',
-      ]
-    );
-
     return config;
   });
 };

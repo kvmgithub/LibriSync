@@ -1,17 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
     <application>
         <!-- Download Service -->
         <service
             android:name=".DownloadService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <!-- Background Task Service -->
-        <service
-            android:name=".tasks.BackgroundTaskService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
@@ -23,16 +15,6 @@
                 <action android:name="expo.modules.rustbridge.PAUSE_DOWNLOAD" />
                 <action android:name="expo.modules.rustbridge.RESUME_DOWNLOAD" />
                 <action android:name="expo.modules.rustbridge.CANCEL_DOWNLOAD" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Boot Receiver (restores background tasks after reboot/update) -->
-        <receiver
-            android:name=".tasks.BootReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

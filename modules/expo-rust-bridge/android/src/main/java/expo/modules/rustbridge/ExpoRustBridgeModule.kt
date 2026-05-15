@@ -230,7 +230,7 @@ class ExpoRustBridgeModule : Module() {
      * @param searchQuery Optional search query (searches title, author, narrator)
      * @param seriesName Optional series filter
      * @param category Optional category/genre filter
-     * @param sortField Sort field: "title", "release_date", or "date_added"
+     * @param sortField Sort field: "title", "release_date", "date_added", "series", or "length"
      * @param sortDirection Sort direction: "asc" or "desc"
      * @return Map with success flag, books array, and total_count
      */
@@ -478,8 +478,8 @@ class ExpoRustBridgeModule : Module() {
     // ============================================================================
 
     /**
-     * Start the background task service.
-     * Must be called once when app starts.
+     * Compatibility no-op.
+     * Periodic background work is scheduled through WorkManager.
      */
     Function("startBackgroundService") {
       try {
@@ -560,7 +560,7 @@ class ExpoRustBridgeModule : Module() {
     }
 
     /**
-     * Start library sync using the new background task system.
+     * Start library sync using WorkManager.
      *
      * @param fullSync Whether to do a full sync (default: false)
      * @return Map with task_id
@@ -569,7 +569,7 @@ class ExpoRustBridgeModule : Module() {
       try {
         val context = appContext.reactContext ?: throw Exception("Context not available")
         expo.modules.rustbridge.tasks.BackgroundTaskService.startLibrarySync(context, fullSync)
-        mapOf("success" to true, "data" to mapOf("message" to "Library sync started"))
+        mapOf("success" to true, "data" to mapOf("message" to "Library sync scheduled"))
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
       }
@@ -830,20 +830,14 @@ class ExpoRustBridgeModule : Module() {
     }
 
     /**
-     * Check if the background service is currently running.
+     * Legacy compatibility status.
+     * Background sync is now scheduled work, not a persistent foreground service.
      *
      * @return Map with isRunning boolean
      */
     Function("isBackgroundServiceRunning") {
       try {
-        val context = appContext.reactContext ?: throw Exception("Context not available")
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-
-        val isRunning = activityManager.getRunningServices(Integer.MAX_VALUE).any { service ->
-          service.service.className == "expo.modules.rustbridge.tasks.BackgroundTaskService"
-        }
-
-        mapOf("success" to true, "data" to mapOf("isRunning" to isRunning))
+        mapOf("success" to true, "data" to mapOf("isRunning" to false))
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
       }

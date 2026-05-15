@@ -21,6 +21,7 @@ object WorkerScheduler {
     private const val TAG = "WorkerScheduler"
     private const val TOKEN_REFRESH_WORK = "token_refresh_periodic"
     private const val LIBRARY_SYNC_WORK = "library_sync_periodic"
+    private const val LIBRARY_SYNC_NOW_WORK = "library_sync_now"
 
     /**
      * Schedule periodic token refresh worker
@@ -101,6 +102,37 @@ object WorkerScheduler {
             Log.d(TAG, "Library sync worker scheduled (interval: ${intervalHours}h, WiFi-only: $wifiOnly)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule library sync worker", e)
+            throw e
+        }
+    }
+
+    /**
+     * Enqueue an immediate, user-requested library sync.
+     *
+     * Library sync is deferrable data transfer, so it should be scheduled through
+     * WorkManager instead of keeping a dataSync foreground service alive.
+     */
+    fun enqueueLibrarySyncNow(context: Context, fullSync: Boolean) {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val workRequest = OneTimeWorkRequestBuilder<LibrarySyncWorker>()
+                .setInputData(workDataOf("full_sync" to fullSync))
+                .setConstraints(constraints)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                LIBRARY_SYNC_NOW_WORK,
+                ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
+
+            Log.d(TAG, "Immediate library sync enqueued (full=$fullSync)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enqueue immediate library sync", e)
             throw e
         }
     }

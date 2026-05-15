@@ -37,7 +37,7 @@ import {getBookSections} from '../services/librivox';
 const DOWNLOAD_PATH_KEY = 'download_path';
 const LIBRARY_PREFS_KEY = 'library_preferences';
 
-type SortField = 'title' | 'release_date' | 'date_added' | 'series';
+type SortField = 'title' | 'release_date' | 'date_added' | 'series' | 'length';
 type SortDirection = 'asc' | 'desc';
 type SourceFilter = 'all' | 'audible' | 'librivox';
 
@@ -839,6 +839,7 @@ export default function LibraryScreen() {
             release_date: 'Release Date',
             date_added: 'Date Added',
             series: 'Series',
+            length: 'Length',
         };
         const arrow = sortDirection === 'asc' ? '↑' : '↓';
         return `${fieldLabels[sortField]} ${arrow}`;
@@ -1028,6 +1029,16 @@ export default function LibraryScreen() {
                                 Series {sortField === 'series' && (sortDirection === 'asc' ? '↑' : '↓')}
                             </Text>
                             {sortField === 'series' && <Text style={styles.modalCheck}>✓</Text>}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.modalOption}
+                            onPress={() => handleSortChange('length', sortDirection === 'asc' ? 'desc' : 'asc')}
+                        >
+                            <Text style={styles.modalOptionText}>
+                                Length {sortField === 'length' && (sortDirection === 'asc' ? '↑' : '↓')}
+                            </Text>
+                            {sortField === 'length' && <Text style={styles.modalCheck}>✓</Text>}
                         </TouchableOpacity>
 
                         <TouchableOpacity
