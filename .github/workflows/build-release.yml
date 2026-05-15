@@ -70,20 +70,20 @@ jobs:
       - name: Rename APK with version
         run: |
           VERSION=${{ github.ref_name }}
-          sudo mv build-output/release/app-release.apk build-output/release/librisync-${VERSION}.apk
+          sudo mv build-output/app-release.apk build-output/librisync-${VERSION}.apk
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: librisync-${{ github.ref_name }}
-          path: build-output/release/librisync-*.apk
+          path: build-output/librisync-*.apk
           retention-days: 30
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: build-output/release/librisync-*.apk
+          files: build-output/librisync-*.apk
           draft: false
           prerelease: false
           generate_release_notes: true
