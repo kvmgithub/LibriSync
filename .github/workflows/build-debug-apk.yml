@@ -81,7 +81,6 @@ jobs:
           name: LibriSync Debug APK ${{ github.run_number }}
           body: |
             Manual debug APK build for `${{ github.ref_name }}` at `${{ github.sha }}`.
-
             This APK embeds its JavaScript bundle and uses application id `tech.henning.librisync.debug`, so it can be installed beside the regular LibriSync app.
           files: ${{ steps.package.outputs.apk }}
           prerelease: true
