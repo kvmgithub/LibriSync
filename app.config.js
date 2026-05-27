@@ -57,6 +57,7 @@ export default {
       "expo-secure-store",
       "./plugins/withDownloadService",
       "./plugins/withFFmpegKit",
+      "./plugins/withStandaloneDebugBuild",
       "./plugins/withReleaseSigning"
     ],
     extra: {
