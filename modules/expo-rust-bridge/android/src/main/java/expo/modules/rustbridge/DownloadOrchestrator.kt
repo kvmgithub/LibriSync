@@ -678,7 +678,7 @@ class DownloadOrchestrator(
      * concurrency limit. Download workers can't advance the queue themselves, so
      * we kick it whenever a download reaches a terminal state.
      */
-    private fun kickDownloadQueue() {
+    fun kickDownloadQueue() {
         try {
             val params = JSONObject().apply { put("db_path", dbPath) }
             ExpoRustBridgeModule.nativeStartPendingDownloads(params.toString())

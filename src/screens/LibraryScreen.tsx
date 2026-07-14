@@ -1066,7 +1066,7 @@ export default function LibraryScreen() {
 
             Alert.alert(
                 'Download Started',
-                `${book.title} has been added to the download queue. You can monitor progress here or leave the app.`
+                `"${book.title}" is downloading. Monitor progress here or in the notification — you can leave the app.`
             );
 
         } catch (error: any) {
