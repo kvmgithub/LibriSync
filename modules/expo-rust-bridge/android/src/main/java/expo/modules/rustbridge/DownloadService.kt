@@ -169,6 +169,10 @@ class DownloadService : Service() {
     // Track current download info for notifications
     private var currentDownload: DownloadInfo? = null
 
+    // For deriving download speed from the change in bytes between progress ticks.
+    private var lastSpeedBytes = 0L
+    private var lastSpeedMs = 0L
+
     data class DownloadInfo(
         val asin: String,
         val title: String,
@@ -190,6 +194,7 @@ class DownloadService : Service() {
         orchestrator.setProgressCallback { asin, stage, percentage, bytesDownloaded, totalBytes, etaSeconds ->
             // Expose stage percentage + ETA to the JS UI (LibraryScreen polls this).
             StageProgressStore.update(asin, stage, percentage.toInt(), etaSeconds)
+            val speedStr = if (stage == "downloading") computeDownloadSpeed(bytesDownloaded) else null
             currentDownload?.let { download ->
                 val progress = DownloadNotificationManager.DownloadProgress(
                     asin = download.asin,
@@ -199,6 +204,7 @@ class DownloadService : Service() {
                     percentage = percentage.toInt(),
                     bytesDownloaded = bytesDownloaded,
                     totalBytes = totalBytes,
+                    speed = speedStr,
                     eta = if (etaSeconds > 0) formatEta(etaSeconds) else null
                 )
                 notificationManager.showProgress(progress)
@@ -277,6 +283,18 @@ class DownloadService : Service() {
 
     private fun requiresForeground(action: String?): Boolean {
         return action == ACTION_ENQUEUE_DOWNLOAD || action == ACTION_RETRY_CONVERSION || action == ACTION_ENQUEUE_LIBRIVOX
+    }
+
+    private fun computeDownloadSpeed(bytesDownloaded: Long): String? {
+        val now = System.currentTimeMillis()
+        val result = if (lastSpeedMs > 0 && now > lastSpeedMs && bytesDownloaded >= lastSpeedBytes) {
+            val bps = (bytesDownloaded - lastSpeedBytes) * 1000.0 / (now - lastSpeedMs)
+            val mb = bps / (1024.0 * 1024.0)
+            if (mb >= 1.0) "%.1f MB/s".format(mb) else "%.0f KB/s".format(bps / 1024.0)
+        } else null
+        lastSpeedBytes = bytesDownloaded
+        lastSpeedMs = now
+        return result
     }
 
     private fun formatEta(seconds: Long): String {
