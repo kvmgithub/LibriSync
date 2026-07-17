@@ -195,7 +195,18 @@ class ExpoRustBridgeModule : Module() {
           put("page", page)
         }
         val result = nativeSyncLibraryPage(params.toString())
-        parseJsonResponse(result)
+        val parsed = parseJsonResponse(result)
+        // On the final page of a full sync, tell the background manager the library sync
+        // finished so auto-download (if enabled) checks for newly added books. Nothing
+        // emitted this before, so auto-download never triggered after a sync.
+        val data = parsed["data"] as? Map<*, *>
+        val hasMore = (data?.get("has_more") as? Boolean) ?: (parsed["has_more"] as? Boolean) ?: true
+        if (parsed["success"] == true && !hasMore) {
+          appContext.reactContext?.let { ctx ->
+            expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(ctx).notifyLibrarySyncComplete()
+          }
+        }
+        parsed
       } catch (e: Exception) {
         mapOf(
           "success" to false,

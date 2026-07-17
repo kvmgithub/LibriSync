@@ -90,6 +90,10 @@ class BackgroundTaskManager private constructor(
         // tokenRefreshWorker = TokenRefreshWorker(context, this) // REMOVED: Now using WorkManager
         // librarySyncWorker = LibrarySyncWorker(context, this)   // REMOVED: Now using WorkManager
         autoDownloadWorker = AutoDownloadWorker(context, this)
+        // If auto-download was left enabled in a previous session, re-arm its sync listener —
+        // enable() is otherwise only called from the UI, so after a cold start nothing would
+        // be listening for LibrarySyncComplete and a sync would never trigger a download.
+        autoDownloadWorker.resumeIfEnabled()
 
         // Start event loop
         startEventLoop()
@@ -147,6 +151,15 @@ class BackgroundTaskManager private constructor(
         Log.d(TAG, "Enqueueing download: $asin - $title")
 
         val taskId = "download_$asin"
+        // Idempotent: a book already downloading or waiting in the queue must not be stacked
+        // a second time. Auto-download can fire from both the immediate enable() scan and the
+        // sync-complete listener, so without this guard the same ASIN could download twice.
+        val alreadyQueued = synchronized(taskQueue) { taskQueue.any { it.id == taskId } }
+        if (activeTasks.containsKey(taskId) || alreadyQueued) {
+            Log.d(TAG, "Download already active or queued for $asin; skipping duplicate enqueue")
+            return taskId
+        }
+
         val task = Task(
             id = taskId,
             type = TaskType.DOWNLOAD,
@@ -198,6 +211,10 @@ class BackgroundTaskManager private constructor(
      * Enable automatic downloads
      */
     fun enableAutoDownload() {
+        // The workers are created in start(); enabling from a stopped service must not
+        // crash on the lateinit. start() is idempotent, and it also starts the event loop
+        // that relays LibrarySyncComplete to the auto-download listener.
+        if (!isStarted) start()
         Log.d(TAG, "Enabling auto-download")
         autoDownloadWorker.enable()
     }
@@ -206,8 +223,38 @@ class BackgroundTaskManager private constructor(
      * Disable automatic downloads
      */
     fun disableAutoDownload() {
+        if (!isStarted) start()
         Log.d(TAG, "Disabling auto-download")
         autoDownloadWorker.disable()
+    }
+
+    /**
+     * Signal that a library sync finished. This is the trigger the auto-download worker
+     * listens for (LibrarySyncComplete was defined and listened for but never emitted, so
+     * auto-download never ran after a sync). If the manager isn't started yet, it is started
+     * on demand when auto-download is enabled; otherwise this is a no-op.
+     */
+    fun notifyLibrarySyncComplete(totalItems: Int = 0, itemsAdded: Int = 0, itemsUpdated: Int = 0) {
+        if (!isStarted) {
+            // A sync can finish before anything started the manager (e.g. the service never
+            // came up). If auto-download is on, start now so the listener is armed; otherwise
+            // there's nothing to notify.
+            val autoOn = context.getSharedPreferences("auto_download_prefs", Context.MODE_PRIVATE)
+                .getBoolean("enabled", false)
+            if (!autoOn) return
+            start()
+        }
+        scope.launch {
+            emitEvent(
+                TaskEvent.LibrarySyncComplete(
+                    taskId = "library_sync_${System.currentTimeMillis()}",
+                    totalItems = totalItems,
+                    itemsAdded = itemsAdded,
+                    itemsUpdated = itemsUpdated
+                )
+            )
+            Log.d(TAG, "Emitted LibrarySyncComplete → auto-download check")
+        }
     }
 
     /**
