@@ -42,10 +42,9 @@ class AutoDownloadWorker(
     fun enable() {
         Log.d(TAG, "Enabling auto-download")
         prefs.edit().putBoolean(PREF_ENABLED, true).apply()
+        // Only arm the listener: auto-download runs after the NEXT library sync, not
+        // immediately on enable (enabling should not suddenly start a batch of downloads).
         startEventListener()
-        // The library is usually already synced when the user flips this on, so scan it
-        // now instead of waiting for the next sync event (which may never come).
-        scope.launch { runCheck() }
     }
 
     /**
