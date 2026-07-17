@@ -209,6 +209,14 @@ class BackgroundTaskManager private constructor(
         return taskId
     }
 
+    /** Whether the task manager (and thus background work) is currently running. */
+    fun isRunning(): Boolean = isStarted
+
+    /** Whether auto-download is enabled. Reads the pref directly so it works even before start(). */
+    fun isAutoDownloadEnabled(): Boolean =
+        context.getSharedPreferences("auto_download_prefs", Context.MODE_PRIVATE)
+            .getBoolean("enabled", false)
+
     /**
      * Enable automatic downloads
      */
@@ -336,6 +344,14 @@ class BackgroundTaskManager private constructor(
      */
     fun clearAllTasks() {
         Log.d(TAG, "Clearing all tasks")
+
+        // Stop the download worker's monitoring loops and abort any in-flight conversion so a
+        // cleared task actually stops (otherwise it keeps polling/logging forever — the
+        // "residual undeletable task" symptom). Guarded: the worker only exists once started.
+        if (isStarted) {
+            runCatching { downloadWorker.cancelAllMonitoring() }
+                .onFailure { Log.w(TAG, "cancelAllMonitoring failed", it) }
+        }
 
         // Cancel all active tasks
         activeTasks.keys.toList().forEach { taskId ->

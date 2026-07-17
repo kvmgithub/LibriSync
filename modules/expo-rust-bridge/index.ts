@@ -784,6 +784,7 @@ export interface ExpoRustBridgeModule {
    * Check if the background service is currently running.
    */
   isBackgroundServiceRunning(): RustResponse<{ isRunning: boolean }>;
+  isAutoDownloadEnabled(): RustResponse<{ isEnabled: boolean }>;
 
   // --------------------------------------------------------------------------
   // Account Storage (SQLite)
@@ -1932,6 +1933,19 @@ function isBackgroundServiceRunning(): boolean {
 }
 
 /**
+ * Check whether auto-download is currently enabled (persisted preference).
+ *
+ * @returns true if auto-download is enabled, false otherwise
+ */
+function isAutoDownloadEnabled(): boolean {
+  const response = NativeModule!.isAutoDownloadEnabled();
+  if (!response.success || !response.data) {
+    return false;
+  }
+  return response.data.isEnabled;
+}
+
+/**
  * Save account to SQLite database (single source of truth).
  *
  * @param dbPath - Database path
@@ -2405,6 +2419,7 @@ export {
   getTask,
   clearAllTasks,
   isBackgroundServiceRunning,
+  isAutoDownloadEnabled,
   // Account Storage (SQLite)
   saveAccount,
   getPrimaryAccount,

@@ -1057,7 +1057,24 @@ class ExpoRustBridgeModule : Module() {
      */
     Function("isBackgroundServiceRunning") {
       try {
-        mapOf("success" to true, "data" to mapOf("isRunning" to false))
+        val context = appContext.reactContext
+        val running = context?.let {
+          expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(it).isRunning()
+        } ?: false
+        mapOf("success" to true, "data" to mapOf("isRunning" to running))
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
+    /**
+     * Whether auto-download is currently enabled (reads the persisted pref).
+     */
+    Function("isAutoDownloadEnabled") {
+      try {
+        val context = appContext.reactContext ?: throw Exception("Context not available")
+        val enabled = expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(context).isAutoDownloadEnabled()
+        mapOf("success" to true, "data" to mapOf("isEnabled" to enabled))
       } catch (e: Exception) {
         mapOf("success" to false, "error" to e.message)
       }
