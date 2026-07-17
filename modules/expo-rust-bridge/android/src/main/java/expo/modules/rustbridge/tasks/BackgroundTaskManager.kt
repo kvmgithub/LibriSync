@@ -1,6 +1,8 @@
 package expo.modules.rustbridge.tasks
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import expo.modules.rustbridge.AppPaths
 import expo.modules.rustbridge.StageProgressStore
@@ -418,9 +420,21 @@ class BackgroundTaskManager private constructor(
     }
 
     /**
-     * Check if WiFi is available
+     * Check if WiFi (or Ethernet) is available.
+     *
+     * Queried live from ConnectivityManager. The old design relied on
+     * BackgroundTaskService pushing status via setWifiAvailable(), but that service is a
+     * no-op now (WorkManager owns periodic work), so the pushed flag stayed false and the
+     * auto-download WiFi gate always failed. Falls back to the pushed flag if the system
+     * service is somehow unavailable.
      */
-    fun isWifiAvailable(): Boolean = isWifiAvailable
+    fun isWifiAvailable(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return isWifiAvailable
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
 
     /**
      * Update WiFi availability
@@ -563,8 +577,8 @@ class BackgroundTaskManager private constructor(
                 true
             }
             TaskType.AUTO_DOWNLOAD -> {
-                // Auto-download requires WiFi
-                isWifiAvailable
+                // Auto-download requires WiFi (queried live)
+                isWifiAvailable()
             }
         }
     }
