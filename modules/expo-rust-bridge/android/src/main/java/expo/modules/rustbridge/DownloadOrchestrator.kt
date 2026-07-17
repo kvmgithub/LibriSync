@@ -668,6 +668,12 @@ class DownloadOrchestrator(
                         break
                     }
                 }
+            } catch (e: CancellationException) {
+                // Normal path: the download/conversion was cancelled or the coroutine scope was
+                // torn down. Not an error — log quietly and rethrow to respect structured
+                // concurrency (previously this was logged at ERROR, spamming the log on cancel).
+                Log.d(TAG, "Monitoring cancelled for $asin")
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error monitoring download $asin", e)
             } finally {
