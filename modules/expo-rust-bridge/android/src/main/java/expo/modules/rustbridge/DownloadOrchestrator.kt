@@ -746,6 +746,21 @@ class DownloadOrchestrator(
         try {
             Log.d(TAG, "Starting conversion for $asin...")
 
+            // Guard: a stale "completed" download task (its cache deleted by an earlier failed
+            // convert) or a 0-byte download (e.g. an auth-failed response) leaves the encrypted
+            // source empty or missing. Decrypting it yields a misleading "activation bytes wrong"
+            // error. Detect it up front, reset the task to "cancelled" so the library offers a
+            // fresh download, and report an honest message. Audiobooks are always far larger than
+            // this floor, so it only trips on empty/truncated files.
+            val encFile = File(encryptedPath)
+            if (!encFile.exists() || encFile.length() < 64 * 1024L) {
+                val len = if (encFile.exists()) encFile.length() else -1L
+                Log.e(TAG, "Encrypted source missing/too small for $asin ($len bytes) — download incomplete; resetting for re-download")
+                resolvedTaskId?.let { updateTaskStatusInDb(it, "cancelled") }
+                errorCallback?.invoke(asin, title, "Download incomplete — please download again")
+                return@withContext
+            }
+
             // Persist decrypting stage to DB
             resolvedTaskId?.let { updateTaskStatusInDb(it, "decrypting") }
 
