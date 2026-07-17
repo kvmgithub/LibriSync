@@ -1493,6 +1493,19 @@ class DownloadOrchestrator(
     }
 
     /**
+     * Abort every in-flight conversion and stop every monitoring loop. Used by the master
+     * "stop all" control. The Rust download tasks are cancelled separately (by the caller) so
+     * this only tears down the Kotlin-side work.
+     */
+    fun cancelAll() {
+        val asins = monitoringJobs.keys.toList()
+        Log.d(TAG, "cancelAll: aborting ${asins.size} monitored downloads/conversions")
+        asins.forEach { abortConversion(it) }
+        monitoringJobs.values.forEach { runCatching { it.cancel() } }
+        monitoringJobs.clear()
+    }
+
+    /**
      * Shutdown orchestrator
      */
     fun shutdown() {

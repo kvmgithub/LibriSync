@@ -929,6 +929,8 @@ export interface ExpoRustBridgeModule {
    * Cancel all background workers.
    */
   cancelAllBackgroundTasks(): RustResponse<{ success: boolean }>;
+  cancelAllDownloads(): RustResponse<{ cancelled: number }>;
+  cancelAllProcesses(): RustResponse<{ cancelled: number }>;
 
   /**
    * Get status of token refresh worker.
@@ -2274,6 +2276,30 @@ function cancelAllBackgroundTasks(): void {
 }
 
 /**
+ * Master stop — cancel all downloads only (leaves scheduled sync/token work running).
+ * @returns number of persistent download tasks cancelled
+ */
+function cancelAllDownloads(): number {
+  const response = NativeModule!.cancelAllDownloads();
+  if (!response.success) {
+    throw new RustBridgeError(response.error || 'Failed to cancel downloads');
+  }
+  return response.data?.cancelled ?? 0;
+}
+
+/**
+ * Master stop — cancel all running processes (downloads + background task manager + scheduled work).
+ * @returns number of persistent download tasks cancelled
+ */
+function cancelAllProcesses(): number {
+  const response = NativeModule!.cancelAllProcesses();
+  if (!response.success) {
+    throw new RustBridgeError(response.error || 'Failed to cancel processes');
+  }
+  return response.data?.cancelled ?? 0;
+}
+
+/**
  * Get status of token refresh worker.
  *
  * @returns Worker state (NOT_SCHEDULED, ENQUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED)
@@ -2442,6 +2468,8 @@ export {
   cancelTokenRefresh,
   cancelLibrarySync,
   cancelAllBackgroundTasks,
+  cancelAllDownloads,
+  cancelAllProcesses,
   getTokenRefreshStatus,
   getLibrarySyncStatus,
   // Permission Management

@@ -1452,6 +1452,40 @@ class ExpoRustBridgeModule : Module() {
     }
 
     /**
+     * Master stop — cancel all downloads only: cancel every Rust download row (active, queued,
+     * paused) and tear down the foreground download engine (abort conversions, clear queues +
+     * notifications). Leaves scheduled sync/token work alone.
+     */
+    Function("cancelAllDownloads") {
+      try {
+        val context = appContext.reactContext ?: throw Exception("Context not available")
+        val cancelled = cancelAllPersistentDownloads(AppPaths.databasePath(context))
+        expo.modules.rustbridge.DownloadService.cancelAllDownloads(context)
+        mapOf("success" to true, "data" to mapOf("cancelled" to cancelled))
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
+    /**
+     * Master stop — cancel all running processes: everything cancelAllDownloads does, plus
+     * quiescing the background task manager (DownloadWorker monitoring + queued tasks) and
+     * cancelling all scheduled WorkManager jobs (library sync + token refresh).
+     */
+    Function("cancelAllProcesses") {
+      try {
+        val context = appContext.reactContext ?: throw Exception("Context not available")
+        val cancelled = cancelAllPersistentDownloads(AppPaths.databasePath(context))
+        expo.modules.rustbridge.DownloadService.cancelAllDownloads(context)
+        expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(context).clearAllTasks()
+        WorkerScheduler.cancelAllWork(context)
+        mapOf("success" to true, "data" to mapOf("cancelled" to cancelled))
+      } catch (e: Exception) {
+        mapOf("success" to false, "error" to e.message)
+      }
+    }
+
+    /**
      * Get status of token refresh worker.
      *
      * @return Map with worker state
@@ -1634,6 +1668,23 @@ class ExpoRustBridgeModule : Module() {
    * @param jsonString The JSON string from Rust
    * @return Map with success flag and either data or error
    */
+  /** Cancel every persistent Rust download task (active, queued, paused). Returns the count cancelled. */
+  private fun cancelAllPersistentDownloads(dbPath: String): Int {
+    var cancelled = 0
+    val parsed = parseJsonResponse(nativeListDownloadTasks(JSONObject().apply { put("db_path", dbPath) }.toString()))
+    val data = parsed["data"] as? Map<*, *>
+    @Suppress("UNCHECKED_CAST")
+    val tasks = (data?.get("tasks") as? List<Map<*, *>>) ?: emptyList()
+    tasks.forEach { t ->
+      val tid = t["task_id"] as? String ?: return@forEach
+      runCatching {
+        nativeCancelDownload(JSONObject().apply { put("db_path", dbPath); put("task_id", tid) }.toString())
+        cancelled++
+      }
+    }
+    return cancelled
+  }
+
   private fun parseJsonResponse(jsonString: String): Map<String, Any?> {
     return try {
       val json = JSONObject(jsonString)

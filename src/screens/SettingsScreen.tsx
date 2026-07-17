@@ -18,6 +18,8 @@ import {
   enableAutoDownload,
   disableAutoDownload,
   isAutoDownloadEnabled,
+  cancelAllDownloads,
+  cancelAllProcesses,
   ExpoRustBridge,
 } from '../../modules/expo-rust-bridge';
 import { getDatabaseFiles, getDatabasePath } from '../utils/appPaths';
@@ -334,6 +336,34 @@ export default function SettingsScreen() {
       console.error('[Settings] Failed to toggle auto-download:', error);
       setAutoDownload(!value); // revert the switch on failure
       Alert.alert('Error', error.message || 'Failed to update auto-download');
+    }
+  };
+
+  const handleStopAll = () => {
+    Alert.alert(
+      'Stop All',
+      'Choose what to stop. Partial files and task state are cleaned up either way.',
+      [
+        { text: 'Cancel all downloads', onPress: () => runStopAll('downloads') },
+        { text: 'Cancel all running processes', style: 'destructive', onPress: () => runStopAll('processes') },
+        { text: 'Back', style: 'cancel' },
+      ]
+    );
+  };
+
+  const runStopAll = (mode: 'downloads' | 'processes') => {
+    try {
+      const n = mode === 'downloads' ? cancelAllDownloads() : cancelAllProcesses();
+      const tasks = `${n} download task${n === 1 ? '' : 's'}`;
+      Alert.alert(
+        'Stopped',
+        mode === 'downloads'
+          ? `Cancelled all downloads (${tasks}).`
+          : `Cancelled all downloads and background processes (${tasks}).`
+      );
+    } catch (error: any) {
+      console.error('[Settings] Stop all failed:', error);
+      Alert.alert('Error', error.message || 'Failed to stop');
     }
   };
 
@@ -844,6 +874,16 @@ export default function SettingsScreen() {
               thumbColor={includePodcasts ? colors.accent : colors.textSecondary}
             />
           </View>
+
+          <TouchableOpacity
+            style={[styles.button, styles.dangerButton]}
+            onPress={handleStopAll}
+          >
+            <Text style={[styles.buttonText, styles.dangerButtonText]}>Stop All Downloads</Text>
+          </TouchableOpacity>
+          <Text style={styles.dangerDescription}>
+            Cancel all downloads, or all running processes. Cleans up partial files and tasks.
+          </Text>
         </View>
 
         <View style={styles.section}>
