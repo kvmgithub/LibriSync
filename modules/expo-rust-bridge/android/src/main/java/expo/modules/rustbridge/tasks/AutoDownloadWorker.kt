@@ -270,22 +270,25 @@ class AutoDownloadWorker(
         try {
             val asin = book["asin"] as? String ?: throw Exception("No ASIN")
             val title = book["title"] as? String ?: throw Exception("No title")
-            val author = book["author"] as? String
 
             // Load account and output directory from preferences
             val accountJson = getAccountJson() ?: throw Exception("No account")
             val outputDir = getOutputDirectory() ?: throw Exception("No output directory")
 
-            Log.d(TAG, "Enqueueing auto-download: $asin - $title")
+            Log.d(TAG, "Enqueueing auto-download via the foreground download pipeline: $asin - $title")
 
-            // Use manager to enqueue download
-            manager.enqueueDownload(
-                asin = asin,
-                title = title,
-                author = author,
-                accountJson = accountJson,
-                outputDirectory = outputDir,
-                quality = "High"
+            // One engine: route auto-downloads through the same DownloadService/DownloadOrchestrator
+            // that manual downloads use, so they get identical stage controls, per-stage cancel,
+            // cleanup, per-book notifications and ASIN de-duplication — no second pipeline to keep
+            // in sync (the two-engine split is what caused the stuck tasks and cross-cancel bugs).
+            expo.modules.rustbridge.DownloadService.enqueueBook(
+                context,
+                manager.getDbPath(),
+                accountJson,
+                asin,
+                title,
+                outputDir,
+                "High"
             )
 
         } catch (e: Exception) {
