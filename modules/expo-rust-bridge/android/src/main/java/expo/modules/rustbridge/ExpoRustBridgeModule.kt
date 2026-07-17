@@ -1668,14 +1668,24 @@ class ExpoRustBridgeModule : Module() {
    * @param jsonString The JSON string from Rust
    * @return Map with success flag and either data or error
    */
-  /** Cancel every persistent Rust download task (active, queued, paused). Returns the count cancelled. */
+  /**
+   * Cancel every in-flight/pending Rust download task. Returns the count cancelled.
+   *
+   * Only cancels work that is actually running or waiting; terminal rows are left untouched.
+   * Cancelling deletes the DownloadTasks row, and a "completed" row is what links a downloaded
+   * book to its file — deleting it would drop the book back to "not downloaded" and force a
+   * re-sync. So completed/failed/cancelled rows are preserved.
+   */
   private fun cancelAllPersistentDownloads(dbPath: String): Int {
+    val cancelable = setOf("queued", "downloading", "paused", "decrypting", "validating", "copying")
     var cancelled = 0
     val parsed = parseJsonResponse(nativeListDownloadTasks(JSONObject().apply { put("db_path", dbPath) }.toString()))
     val data = parsed["data"] as? Map<*, *>
     @Suppress("UNCHECKED_CAST")
     val tasks = (data?.get("tasks") as? List<Map<*, *>>) ?: emptyList()
     tasks.forEach { t ->
+      val status = (t["status"] as? String)?.lowercase() ?: ""
+      if (status !in cancelable) return@forEach  // preserve completed (downloaded) + failed/cancelled
       val tid = t["task_id"] as? String ?: return@forEach
       runCatching {
         nativeCancelDownload(JSONObject().apply { put("db_path", dbPath); put("task_id", tid) }.toString())
