@@ -415,6 +415,14 @@ class DownloadService : Service() {
         val outputDir = intent.getStringExtra(EXTRA_OUTPUT_DIR) ?: return
         val quality = intent.getStringExtra(EXTRA_QUALITY) ?: "High"
 
+        // Idempotent per book: manual and auto-download both route here, and an auto-download
+        // check can re-run while a book is still in flight — a second enqueue would create two
+        // Rust rows racing over the same cache file.
+        if (activeDownloads.containsKey(asin) || pendingDownloads.any { it.asin == asin }) {
+            Log.d(TAG, "Download already active or pending for $asin; ignoring duplicate enqueue")
+            return
+        }
+
         Log.d(TAG, "Enqueueing download via orchestrator: $asin - $title")
 
         dispatchDownload(asin, title) {

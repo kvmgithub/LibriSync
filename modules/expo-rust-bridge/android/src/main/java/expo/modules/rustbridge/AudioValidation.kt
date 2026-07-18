@@ -154,6 +154,10 @@ suspend fun validateAudioFile(
         Log.d(TAG, "Validation result: ${if (isValid) "VALID" else "CORRUPT"} ($totalErrors errors)")
 
         AudioValidationResult(isValid, totalErrors, errorMessage, duration, sampleResults)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        // A user cancel must propagate as a cancel, not masquerade as a corrupt file —
+        // callers delete the cached source on a failed validation.
+        throw e
     } catch (e: Exception) {
         Log.e(TAG, "Error validating audio file", e)
         AudioValidationResult(false, -1, "Validation failed: ${e.message}", 0.0)

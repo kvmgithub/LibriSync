@@ -946,7 +946,9 @@ export default function LibraryScreen() {
         return true;
     };
 
-    const handleDownload = async (book: Book, silent = false) => {
+    // Returns true when a download was actually started/enqueued, false on any refusal or
+    // failure — the batch mode uses this for an honest "Started X of N" summary.
+    const handleDownload = async (book: Book, silent = false): Promise<boolean> => {
         // Guard against re-selecting a book that is already downloading or queued.
         const existingStage = stageProgress[book.audible_product_id];
         const existingTask = downloadTasks.get(book.audible_product_id);
@@ -956,7 +958,7 @@ export default function LibraryScreen() {
         const activeStatuses = ['downloading', 'paused', 'queued'];
         if (existingStage || (existingTask && activeStatuses.includes(existingTask.status))) {
             if (!silent) Alert.alert('Already in Progress', `"${book.title}" is already downloading or queued.`);
-            return;
+            return false;
         }
         try {
             // Demo mode: real LibriVox MP3 download to the app sandbox (no SAF dir,
@@ -967,7 +969,7 @@ export default function LibraryScreen() {
                     'Download Started',
                     `"${book.title}" is downloading. Watch the progress here in the library.`
                 );
-                return;
+                return true;
             }
 
             const downloadDir = await SecureStore.getItemAsync(DOWNLOAD_PATH_KEY);
@@ -977,7 +979,7 @@ export default function LibraryScreen() {
                     'Please go to Settings and choose a download directory first.',
                     [{ text: 'OK' }]
                 );
-                return;
+                return false;
             }
 
             // LibriVox books: background download, no auth needed
@@ -1000,33 +1002,34 @@ export default function LibraryScreen() {
                             'Download Started',
                             `"${book.title}" is downloading. Check the notification for progress.`
                         );
-                    } else if (!silent) {
-                        Alert.alert('Error', 'Could not find download URL for this book.');
+                        return true;
                     }
+                    console.warn('[LibraryScreen] No download URL for LibriVox book:', book.audible_product_id);
+                    if (!silent) Alert.alert('Error', 'Could not find download URL for this book.');
                 } catch (dlError: any) {
                     console.error('[LibraryScreen] LibriVox download error:', dlError);
-                    Alert.alert('Download Failed', dlError.message || 'Unknown error');
+                    if (!silent) Alert.alert('Download Failed', dlError.message || 'Unknown error');
                 }
-                return;
+                return false;
             }
 
             // Audible books: existing DRM download flow
             if (book.is_downloadable === false) {
-                Alert.alert(
+                if (!silent) Alert.alert(
                     'Not Downloadable',
                     'This item is a podcast or periodical parent. Enable podcasts to sync episodes, then download an episode instead.'
                 );
-                return;
+                return false;
             }
 
             const hasPermission = await requestNotificationPermission();
             if (!hasPermission) {
-                Alert.alert(
+                if (!silent) Alert.alert(
                     'Permission Required',
                     'Please grant notification permission to see download progress',
                     [{ text: 'OK' }]
                 );
-                return;
+                return false;
             }
 
             const dbPath = getDatabasePath();
@@ -1042,8 +1045,8 @@ export default function LibraryScreen() {
             }
 
             if (!account) {
-                Alert.alert('Error', 'Please log in first');
-                return;
+                if (!silent) Alert.alert('Error', 'Please log in first');
+                return false;
             }
 
             if (account.identity?.access_token) {
@@ -1066,8 +1069,8 @@ export default function LibraryScreen() {
                         console.log('[LibraryScreen] Token refreshed successfully');
                     } catch (refreshError) {
                         console.error('[LibraryScreen] Token refresh failed:', refreshError);
-                        Alert.alert('Error', 'Please log in again - token refresh failed');
-                        return;
+                        if (!silent) Alert.alert('Error', 'Please log in again - token refresh failed');
+                        return false;
                     }
                 }
             }
@@ -1097,14 +1100,16 @@ export default function LibraryScreen() {
 
             console.log('[LibraryScreen] Download enqueued successfully');
 
-            Alert.alert(
+            if (!silent) Alert.alert(
                 'Download Started',
                 `"${book.title}" is downloading. Monitor progress here or in the notification — you can leave the app.`
             );
+            return true;
 
         } catch (error: any) {
             console.error('[LibraryScreen] Download error:', error);
-            Alert.alert('Download Failed', error.message || 'Unknown error');
+            if (!silent) Alert.alert('Download Failed', error.message || 'Unknown error');
+            return false;
         }
     };
 
@@ -1422,16 +1427,19 @@ export default function LibraryScreen() {
                 return;
             }
         }
+        let started = 0;
         for (const b of books) {
-            try {
-                await handleDownload(b, true); // silent: batch shows one summary, not per-book alerts
-            } catch (e) {
-                console.warn('[LibraryScreen] Batch download failed for', b.audible_product_id, e);
-            }
+            // silent: the batch shows one summary instead of per-book alerts
+            if (await handleDownload(b, true)) started++;
         }
         const n = books.length;
         exitBatchMode();
-        Alert.alert('Batch Download', `Started downloading ${n} book${n === 1 ? '' : 's'}.`);
+        Alert.alert(
+            'Batch Download',
+            started === n
+                ? `Started downloading ${n} book${n === 1 ? '' : 's'}.`
+                : `Started ${started} of ${n} books. The rest were skipped or failed — check the library list.`
+        );
     };
 
     const renderItem = ({item}: { item: Book }) => {

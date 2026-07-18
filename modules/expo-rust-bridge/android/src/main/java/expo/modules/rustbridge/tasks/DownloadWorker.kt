@@ -985,12 +985,14 @@ class DownloadWorker(
 
             // Best-effort cancel of the Rust download — only meaningful while still downloading;
             // past that the download row is already complete and there is nothing to cancel.
+            // Log a refusal so a download that keeps running unmonitored is diagnosable.
             if (rustTaskId != null) {
                 val cancelParams = JSONObject().apply {
                     put("db_path", manager.getDbPath())
                     put("task_id", rustTaskId)
                 }
-                runCatching { ExpoRustBridgeModule.nativeCancelDownload(cancelParams.toString()) }
+                runCatching { parseJsonResponse(ExpoRustBridgeModule.nativeCancelDownload(cancelParams.toString())) }
+                    .onSuccess { if (it["success"] != true) Log.w(TAG, "nativeCancelDownload refused for $asin: ${it["error"]}") }
                     .onFailure { Log.w(TAG, "nativeCancelDownload failed for $asin", it) }
             }
 
@@ -1026,6 +1028,13 @@ class DownloadWorker(
      * of looping forever (the "residual undeletable task" symptom).
      */
     fun cancelAllMonitoring() {
+        // Flag every monitored book as cancelled, not just those with a live FFmpeg session:
+        // a book in the validating or copying stage has no session, and Job.cancel() alone
+        // cannot interrupt those loops — only the cancelledConversions flag stops them.
+        monitoringJobs.keys.toList().forEach { taskId ->
+            manager.getTask(taskId)?.getMetadataString(DownloadTaskMetadata.ASIN)
+                ?.let { cancelledConversions.add(it) }
+        }
         monitoringJobs.values.forEach { runCatching { it.cancel() } }
         monitoringJobs.clear()
         activeFfmpegSessions.keys.toList().forEach { asin -> abortConversion(asin) }

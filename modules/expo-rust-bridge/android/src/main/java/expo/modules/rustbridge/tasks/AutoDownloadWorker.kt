@@ -171,9 +171,14 @@ class AutoDownloadWorker(
 
         Log.d(TAG, "Starting event listener for library sync completion")
 
+        // The shared event flow replays buffered events to new collectors, so without this
+        // cutoff, enabling auto-download after a sync already ran this session would replay
+        // that old LibrarySyncComplete and start downloads immediately — exactly the
+        // "downloads on enable" behavior this listener-only design avoids.
+        val armedAt = System.currentTimeMillis()
         eventListenerJob = scope.launch {
             manager.eventFlow
-                .filter { it is TaskEvent.LibrarySyncComplete }
+                .filter { it is TaskEvent.LibrarySyncComplete && it.emittedAt >= armedAt }
                 .collect { event ->
                     Log.d(TAG, "Library sync completed, triggering auto-download check")
                     runCheck()
@@ -214,7 +219,9 @@ class AutoDownloadWorker(
                 }
                 val resultObj = JSONObject(ExpoRustBridgeModule.nativeGetBooksWithFilters(params.toString()))
                 if (!resultObj.optBoolean("success")) {
-                    Log.w(TAG, "Failed to get books: ${resultObj.optString("error")}")
+                    // Error, not warning: a failure on the first page means auto-download is
+                    // effectively dead this round while the task still ends "completed".
+                    Log.e(TAG, "Failed to get books (offset=$offset): ${resultObj.optString("error")}")
                     break
                 }
 

@@ -154,8 +154,7 @@ class BackgroundTaskManager private constructor(
 
         val taskId = "download_$asin"
         // Idempotent: a book already downloading or waiting in the queue must not be stacked
-        // a second time. Auto-download can fire from both the immediate enable() scan and the
-        // sync-complete listener, so without this guard the same ASIN could download twice.
+        // a second time, e.g. when successive sync-complete checks pick the same book.
         val alreadyQueued = synchronized(taskQueue) { taskQueue.any { it.id == taskId } }
         if (activeTasks.containsKey(taskId) || alreadyQueued) {
             Log.d(TAG, "Download already active or queued for $asin; skipping duplicate enqueue")

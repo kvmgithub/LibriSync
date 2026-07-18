@@ -784,6 +784,12 @@ export interface ExpoRustBridgeModule {
    * Check if the background service is currently running.
    */
   isBackgroundServiceRunning(): RustResponse<{ isRunning: boolean }>;
+
+  /**
+   * Check whether auto-download is enabled (persisted preference).
+   *
+   * @returns Response with isEnabled flag
+   */
   isAutoDownloadEnabled(): RustResponse<{ isEnabled: boolean }>;
 
   // --------------------------------------------------------------------------

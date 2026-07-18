@@ -202,9 +202,13 @@ class ExpoRustBridgeModule : Module() {
         val data = parsed["data"] as? Map<*, *>
         val hasMore = (data?.get("has_more") as? Boolean) ?: (parsed["has_more"] as? Boolean) ?: true
         if (parsed["success"] == true && !hasMore) {
-          appContext.reactContext?.let { ctx ->
-            expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(ctx).notifyLibrarySyncComplete()
-          }
+          // Best-effort: the sync itself already succeeded and is persisted; a failure to
+          // notify auto-download must not turn the final page into a sync error.
+          runCatching {
+            appContext.reactContext?.let { ctx ->
+              expo.modules.rustbridge.tasks.BackgroundTaskManager.getInstance(ctx).notifyLibrarySyncComplete()
+            }
+          }.onFailure { android.util.Log.w("ExpoRustBridge", "Failed to notify auto-download after sync", it) }
         }
         parsed
       } catch (e: Exception) {
@@ -1659,17 +1663,7 @@ class ExpoRustBridgeModule : Module() {
   }
 
   /**
-   * Parse JSON response from Rust into a Kotlin Map.
-   *
-   * Rust returns JSON in the format:
-   * Success: { "success": true, "data": {...} }
-   * Error: { "success": false, "error": "error message" }
-   *
-   * @param jsonString The JSON string from Rust
-   * @return Map with success flag and either data or error
-   */
-  /**
-   * Cancel every in-flight/pending Rust download task. Returns the count cancelled.
+   * Cancel every in-flight/pending Rust download task. Returns the count actually cancelled.
    *
    * Only cancels work that is actually running or waiting; terminal rows are left untouched.
    * Cancelling deletes the DownloadTasks row, and a "completed" row is what links a downloaded
@@ -1679,22 +1673,40 @@ class ExpoRustBridgeModule : Module() {
   private fun cancelAllPersistentDownloads(dbPath: String): Int {
     val cancelable = setOf("queued", "downloading", "paused", "decrypting", "validating", "copying")
     var cancelled = 0
-    val parsed = parseJsonResponse(nativeListDownloadTasks(JSONObject().apply { put("db_path", dbPath) }.toString()))
-    val data = parsed["data"] as? Map<*, *>
+    val listParsed = parseJsonResponse(nativeListDownloadTasks(JSONObject().apply { put("db_path", dbPath) }.toString()))
+    if (listParsed["success"] != true) {
+      android.util.Log.w("ExpoRustBridge", "cancelAll: listing download tasks failed: ${listParsed["error"]}")
+      return 0
+    }
+    val data = listParsed["data"] as? Map<*, *>
     @Suppress("UNCHECKED_CAST")
     val tasks = (data?.get("tasks") as? List<Map<*, *>>) ?: emptyList()
     tasks.forEach { t ->
       val status = (t["status"] as? String)?.lowercase() ?: ""
       if (status !in cancelable) return@forEach  // preserve completed (downloaded) + failed/cancelled
       val tid = t["task_id"] as? String ?: return@forEach
-      runCatching {
-        nativeCancelDownload(JSONObject().apply { put("db_path", dbPath); put("task_id", tid) }.toString())
+      val result = runCatching {
+        parseJsonResponse(nativeCancelDownload(JSONObject().apply { put("db_path", dbPath); put("task_id", tid) }.toString()))
+      }.getOrNull()
+      if (result?.get("success") == true) {
         cancelled++
+      } else {
+        android.util.Log.w("ExpoRustBridge", "cancelAll: failed to cancel $tid: ${result?.get("error")}")
       }
     }
     return cancelled
   }
 
+  /**
+   * Parse JSON response from Rust into a Kotlin Map.
+   *
+   * Rust returns JSON in the format:
+   * Success: { "success": true, "data": {...} }
+   * Error: { "success": false, "error": "error message" }
+   *
+   * @param jsonString The JSON string from Rust
+   * @return Map with success flag and either data or error
+   */
   private fun parseJsonResponse(jsonString: String): Map<String, Any?> {
     return try {
       val json = JSONObject(jsonString)
