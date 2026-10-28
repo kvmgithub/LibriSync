@@ -1,0 +1,130 @@
+name: Prerelease APK
+
+# Builds an arm64-v8a debug APK of a branch and publishes it as the prerelease
+# "pre/<branch>". It installs next to the official app (withDebugApplicationId:
+# tech.henning.librisync.debug, "LibriSync Debug") and over any earlier debug
+# build: every debug build is signed with the Expo template's debug.keystore.
+#
+# Automatic builds run on a schedule, not on push: a push runs the workflow file
+# of the pushed branch, and PR branches cut from upstream/main don't carry this
+# file. The schedule runs from main and builds every branch whose head commit
+# changed within the last three days and has no prerelease yet.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to build
+        required: true
+        default: main
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.plan.outputs.builds }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL: ${{ inputs.branch }}
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY"
+
+          if [ -n "$MANUAL" ]; then
+            sha=$(git ls-remote --heads "$url" "refs/heads/$MANUAL" | cut -f1)
+            [ -n "$sha" ] || { echo "::error::No branch '$MANUAL'"; exit 1; }
+            echo "builds=$(jq -cn --arg b "$MANUAL" --arg s "$sha" '[{branch:$b,sha:$s}]')" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tags=$(git ls-remote --tags "$url")
+          cutoff=$(date -u -d '3 days ago' +%FT%TZ)
+          builds='[]'
+          while read -r sha ref; do
+            branch=${ref#refs/heads/}
+            grep -qxF "$sha"$'\t'"refs/tags/pre/$branch" <<<"$tags" && continue
+            date=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.committer.date)
+            [[ "$date" < "$cutoff" ]] && continue
+            builds=$(jq -c --arg b "$branch" --arg s "$sha" '. + [{branch:$b,sha:$s}]' <<<"$builds")
+          done < <(git ls-remote --heads "$url")
+          echo "builds=$builds" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.builds != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
+    concurrency:
+      group: pre-${{ matrix.branch }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: ${{ matrix.branch }}
+      SHA: ${{ matrix.sha }}
+      TAG: pre/${{ matrix.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+
+      # The tag is set before the build: the Docker build clones it, so the APK is
+      # exactly this commit, and the schedule won't plan the same commit twice.
+      - name: Point the prerelease tag at the commit
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" -f sha="$SHA" -F force=true >/dev/null 2>&1 \
+            || gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null
+          echo "SHORT=${SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+
+      # Patches only this runner's copy of the Dockerfile, right after expo prebuild:
+      # - Debug builds normally leave the JS bundle out and load it from Metro.
+      #   Embed it so the APK runs on its own; a running Metro still takes over.
+      # - arm64-v8a only. The React Native Gradle plugin turns
+      #   reactNativeArchitectures into ndk.abiFilters (splits are off), so the APK
+      #   carries no other ABI; Rust skips its other three targets.
+      - name: Embedded JS bundle, arm64-v8a only
+        run: |
+          cat > "$RUNNER_TEMP/pre.Dockerfile" <<'EOF'
+          RUN sed -i 's/^react {$/react {\n    debuggableVariants = []/' android/app/build.gradle \
+           && grep -q 'debuggableVariants = \[\]' android/app/build.gradle \
+           && sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/' android/gradle.properties \
+           && grep -qx 'reactNativeArchitectures=arm64-v8a' android/gradle.properties \
+           && sed -i 's/^RUST_TARGETS=.*/RUST_TARGETS=("aarch64-linux-android")/; s/^ANDROID_ARCHS=.*/ANDROID_ARCHS=("arm64-v8a")/' scripts/build-rust-android-docker.sh \
+           && grep -qx 'ANDROID_ARCHS=("arm64-v8a")' scripts/build-rust-android-docker.sh
+          EOF
+          sed -i "/^RUN npx expo prebuild/r $RUNNER_TEMP/pre.Dockerfile" Dockerfile
+          grep -q 'debuggableVariants' Dockerfile
+
+      - name: Build debug APK
+        env:
+          GIT_REPO: ${{ github.server_url }}/${{ github.repository }}.git
+          GIT_BRANCH: ${{ env.TAG }}
+          BUILD_TYPE: debug
+          APP_VERSION: ${{ matrix.branch }}@${{ env.SHORT }}
+          GITHUB_RELEASE: 'false'
+        run: bash ./docker-build.sh build
+
+      # docker-build.sh reports success even when the inner build failed.
+      - name: Publish prerelease
+        run: |
+          apk=build-output/app-debug.apk
+          [ -f "$apk" ] || { echo "::error::$apk missing"; ls -l build-output; exit 1; }
+          name="librisync-debug-${BRANCH//\//-}-$SHORT-arm64-v8a.apk"
+          sudo mv "$apk" "$name"
+          { git log -1 --format='%s%n%n%b'; echo; echo "Installs next to the official app as **LibriSync Debug**."; } > notes.md
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" "$name" --verify-tag --prerelease --title "Pre $BRANCH @ $SHORT" --notes-file notes.md
